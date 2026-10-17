@@ -196,6 +196,14 @@ BRIDGE = {
     'OFFICIAL_QUOTA_TTL_SECONDS': int(
         os.environ.get('BRIDGE_OFFICIAL_QUOTA_TTL_SECONDS', '60')
     ),
+    # Dynamic routing: score = cost + TTFT + speed + error rate.
+    'ROUTING_MODE': os.environ.get('BRIDGE_ROUTING_MODE', 'dynamic'),
+    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.40')),
+    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.30')),
+    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.20')),
+    'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.10')),
+    'WEIGHT_PRIORITY': float(os.environ.get('BRIDGE_WEIGHT_PRIORITY', '0.05')),
+    'STATS_MIN_SAMPLES': int(os.environ.get('BRIDGE_STATS_MIN_SAMPLES', '3')),
 }
 
 LOGGING = {

@@ -180,34 +180,44 @@ def record_probe_usage(
 # Selection
 # ---------------------------------------------------------------------------
 def _candidates(
-    accounts: list[Account], now: datetime, protocols: list[str] | None = None
+    accounts: list[Account],
+    now: datetime,
+    protocols: list[str] | None = None,
+    model: str = "",
 ) -> list[Account]:
     if protocols:
         accounts = [account for account in accounts if account.protocol in protocols]
+    if model:
+        accounts = [
+            account
+            for account in accounts
+            if model not in (account.blocked_models or [])
+        ]
     available = [account for account in accounts if account.is_available(now)]
-    official = sorted(
-        (a for a in available if a.tier == Account.TIER_OFFICIAL),
-        key=lambda a: (a.priority, a.utilization(), a.name),
-    )
-    third_party = sorted(
-        (a for a in available if a.tier == Account.TIER_THIRD_PARTY),
-        key=lambda a: (a.priority, a.utilization(), a.name),
-    )
-    return official + third_party
+    from .metrics import rank_accounts
+
+    official = [a for a in available if a.tier == Account.TIER_OFFICIAL]
+    third_party = [a for a in available if a.tier == Account.TIER_THIRD_PARTY]
+    return rank_accounts(official, model) + rank_accounts(third_party, model)
 
 
 def available_accounts(
-    now: datetime | None = None, protocols: list[str] | None = None
+    now: datetime | None = None,
+    protocols: list[str] | None = None,
+    model: str = "",
 ) -> list[Account]:
     now = now or timezone.now()
     accounts = list(
         Account.objects.filter(enabled=True).prefetch_related("windows").order_by("priority", "name")
     )
-    return _candidates(accounts, now, protocols)
+    return _candidates(accounts, now, protocols, model)
 
 
 def reserve_next_account(
-    exclude_ids=(), now: datetime | None = None, protocols: list[str] | None = None
+    exclude_ids=(),
+    now: datetime | None = None,
+    protocols: list[str] | None = None,
+    model: str = "",
 ) -> Account | None:
     """Atomically pick the best account and bump its in-flight counter."""
     now = now or timezone.now()
@@ -218,7 +228,9 @@ def reserve_next_account(
             queryset = queryset.select_for_update()
         accounts = list(queryset.prefetch_related("windows").order_by("priority", "name"))
         candidates = [
-            a for a in _candidates(accounts, now, protocols) if a.pk not in excluded
+            a
+            for a in _candidates(accounts, now, protocols, model)
+            if a.pk not in excluded
         ]
         if not candidates:
             return None

@@ -123,6 +123,18 @@ curl http://127.0.0.1:8000/api/health
 
 返回每个账号的 tier、额度模式、各窗口利用率、剩余比例、保留线、冷却状态与最近错误。
 
+## 动态路由
+
+当 `BRIDGE_ROUTING_MODE=dynamic`（默认）时，桥会在同一 tier 内按以下指标打分选渠道，而不是固定优先级：
+
+- **价格**：账号 `price_multiplier` × 模型价格，或该账号实测的每千 token 成本
+- **首字延迟**：流式请求的首个内容事件耗时 EWMA
+- **生成速度**：输出 token / 生成耗时 EWMA
+- **错误率**：成功率的 EWMA
+- **探索**：样本不足的渠道有 15% 分数加成，避免一开始就被冷落
+
+权重可通过环境变量调整（默认 `0.40 / 0.30 / 0.20 / 0.10`）。官方账号仍优先于第三方；同一 tier 内才做动态比较。若某渠道返回「模型不可用」，该账号会被加入 `blocked_models`，本请求自动换下一个渠道。
+
 ## 生产部署
 
 ### 直接运行
@@ -196,6 +208,10 @@ docker compose logs -f
 | `BRIDGE_CODEX_AUTH_PATH` | `~/.codex/auth.json` | 官方 ChatGPT 登录文件 |
 | `BRIDGE_OFFICIAL_QUOTA_URL` | `https://chatgpt.com/backend-api/wham/usage` | 官方额度接口 |
 | `BRIDGE_OFFICIAL_QUOTA_TTL_SECONDS` | `60` | 官方额度缓存时间 |
+| `BRIDGE_ROUTING_MODE` | `dynamic` | `dynamic` 动态评分 / `priority` 固定优先级 |
+| `BRIDGE_WEIGHT_COST` / `WEIGHT_TTFT` / `WEIGHT_SPEED` / `WEIGHT_ERROR` | `0.40/0.30/0.20/0.10` | 动态评分权重 |
+| `BRIDGE_WEIGHT_PRIORITY` | `0.05` | 优先级在评分中的权重 |
+| `BRIDGE_STATS_MIN_SAMPLES` | `3` | 低于该样本数时给予探索加成 |
 | `BRIDGE_MAX_ATTEMPTS` | `3` | 单请求最多尝试账号数 |
 | `BRIDGE_TIMEOUT_SECONDS` | `600` | 上游超时 |
 

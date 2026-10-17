@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from decimal import Decimal
 
 from django.conf import settings
@@ -145,6 +146,7 @@ class SSEUsageParser:
         self.buffer = b""
         self.usage: dict[str, int] = {}
         self.model = ""
+        self.first_content_at: float | None = None
 
     def feed(self, chunk: bytes) -> None:
         self.buffer += chunk
@@ -177,6 +179,12 @@ class SSEUsageParser:
         if not isinstance(event, dict):
             return
         event_type = event.get("type")
+        if event_type in (
+            "content_block_delta",
+            "response.output_text.delta",
+            "response.content_part.added",
+        ) and self.first_content_at is None:
+            self.first_content_at = time.monotonic()
         if event_type in (
             "response.created",
             "response.in_progress",

@@ -111,11 +111,27 @@ class Account(models.Model):
 
     enabled = models.BooleanField("启用", default=True)
     priority = models.IntegerField("优先级 (越小越先用)", default=100)
+    price_multiplier = models.DecimalField(
+        "价格系数", max_digits=6, decimal_places=4, default=Decimal("1.0"),
+        help_text="按量计费的实际单价系数，用于动态路由比价。",
+    )
     max_inflight = models.PositiveIntegerField("最大并发", default=4)
     inflight = models.PositiveIntegerField("当前并发", default=0)
     cooldown_until = models.DateTimeField("冷却截止", null=True, blank=True)
     last_error = models.TextField("最近错误", blank=True, default="")
 
+    # Rolling metrics used by dynamic routing.
+    ewma_ttft_ms = models.FloatField("首字延迟 EWMA (ms)", null=True, blank=True)
+    ewma_tps = models.FloatField("生成速度 EWMA (tok/s)", null=True, blank=True)
+    ewma_cost_per_1k = models.DecimalField(
+        "每千 token 成本 EWMA (USD)", max_digits=12, decimal_places=6,
+        null=True, blank=True,
+    )
+    ewma_success = models.FloatField("成功率 EWMA", null=True, blank=True)
+    stats_samples = models.PositiveIntegerField("样本数", default=0)
+    stats_updated_at = models.DateTimeField("指标更新时间", null=True, blank=True)
+
+    blocked_models = models.JSONField("不支持的模型", default=list, blank=True)
     extra_headers = models.JSONField("附加请求头", default=dict, blank=True)
     last_probe_at = models.DateTimeField("最近查询时间", null=True, blank=True)
     last_probe_error = models.TextField("最近查询错误", blank=True, default="")
@@ -260,6 +276,8 @@ class RequestLog(models.Model):
         max_digits=12, decimal_places=6, null=True, blank=True
     )
     duration_ms = models.IntegerField(null=True, blank=True)
+    ttft_ms = models.IntegerField(null=True, blank=True)
+    tps = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

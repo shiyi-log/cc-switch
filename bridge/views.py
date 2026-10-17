@@ -19,6 +19,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Account, RequestLog
+from .metrics import update_account_stats
 from .official import refresh_official_quotas
 from .probe import probe_account, refresh_stale_probes
 from .quotas import (
@@ -105,6 +106,17 @@ def _protocols_for_path(path: str) -> list[str] | None:
     return None
 
 
+def _block_model(account_id, model: str) -> None:
+    account = Account.objects.filter(pk=account_id).first()
+    if account is None or not model:
+        return
+    blocked = list(account.blocked_models or [])
+    if model not in blocked:
+        blocked.append(model)
+        account.blocked_models = blocked
+        account.save(update_fields=["blocked_models"])
+
+
 def _extract_error_message(content: bytes) -> str:
     try:
         payload = json.loads(content)
@@ -151,14 +163,40 @@ async def _record(
     model: str,
     status_code: int,
     usage: dict | None,
+    started: float,
+    ttft_ms: float | None = None,
     blocked_reason: str = "",
 ) -> None:
     usage = usage or {}
+    duration_ms = int((time.monotonic() - started) * 1000)
+    ttft = int(ttft_ms) if ttft_ms is not None else duration_ms
+    output_tokens = int(usage.get("output_tokens") or 0)
+    tps = None
+    if output_tokens and duration_ms > ttft:
+        tps = output_tokens / max(0.001, (duration_ms - ttft) / 1000.0)
     cost = await sync_to_async(calculate_cost)(model, usage)
     if cost is None and account.quota_mode == Account.QUOTA_BUDGET:
         logger.warning("no ModelPrice for %r: budget spend was not recorded", model)
     if cost is not None and account.quota_mode == Account.QUOTA_BUDGET:
         await sync_to_async(record_budget_spend)(account, cost)
+    total_tokens = sum(
+        int(usage.get(key) or 0)
+        for key in (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        )
+    )
+    await sync_to_async(update_account_stats)(
+        account.pk,
+        ttft_ms=ttft,
+        duration_ms=duration_ms,
+        total_tokens=total_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost,
+        success=True,
+    )
     await sync_to_async(_log_request)(
         account=account,
         request_id=request_id,
@@ -171,6 +209,9 @@ async def _record(
         cache_read_tokens=int(usage.get("cache_read_input_tokens") or 0),
         cache_write_tokens=int(usage.get("cache_creation_input_tokens") or 0),
         cost_usd=cost,
+        duration_ms=duration_ms,
+        ttft_ms=ttft,
+        tps=tps,
     )
 
 
@@ -217,7 +258,9 @@ async def proxy(request, path: str):
     last_error_message = ""
 
     for _ in range(max_attempts):
-        account = await sync_to_async(reserve_next_account)(attempted, protocols=protocols)
+        account = await sync_to_async(reserve_next_account)(
+            attempted, protocols=protocols, model=model
+        )
         if account is None:
             break
         attempted.add(account.pk)
@@ -258,7 +301,10 @@ async def proxy(request, path: str):
             last_error_message = message
             await _close(client, response)
 
-            retryable = status_code in RETRYABLE_STATUS
+            model_unavailable = status_code == 404 and "model" in message.lower()
+            if model_unavailable and model:
+                await sync_to_async(_block_model)(account.pk, model)
+            retryable = status_code in RETRYABLE_STATUS or model_unavailable
             if retryable:
                 await sync_to_async(mark_failure)(account.pk, message, status_code)
             await sync_to_async(_log_request)(
@@ -326,6 +372,12 @@ async def _success(account, client, response, request, path, request_id, model, 
                         model=model or parser.model,
                         status_code=response.status_code,
                         usage=parser.usage,
+                        started=started,
+                        ttft_ms=(
+                            (parser.first_content_at - started) * 1000
+                            if parser.first_content_at
+                            else None
+                        ),
                     )
                 finally:
                     await sync_to_async(release_account)(account.pk)
@@ -356,6 +408,7 @@ async def _success(account, client, response, request, path, request_id, model, 
         model=model,
         status_code=status_code,
         usage=usage,
+        started=started,
     )
     return HttpResponse(content, status=status_code, content_type=content_type, headers=headers)
 
@@ -403,6 +456,14 @@ async def status(request):
                     "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,
                     "last_error": account.last_error,
                     "last_probe_error": account.last_probe_error,
+                    "price_multiplier": float(account.price_multiplier or 1),
+                    "ttft_ms": account.ewma_ttft_ms,
+                    "tps": account.ewma_tps,
+                    "cost_per_1k": float(account.ewma_cost_per_1k)
+                    if account.ewma_cost_per_1k is not None
+                    else None,
+                    "success_rate": account.ewma_success,
+                    "samples": account.stats_samples,
                     "windows": [_window_payload(w) for w in account.windows.all()],
                 }
             )
@@ -446,6 +507,9 @@ async def logs(request):
                     "output_tokens": log.output_tokens,
                     "cache_read_tokens": log.cache_read_tokens,
                     "cost_usd": str(log.cost_usd) if log.cost_usd is not None else None,
+                    "duration_ms": log.duration_ms,
+                    "ttft_ms": log.ttft_ms,
+                    "tps": log.tps,
                 }
             )
         return rows
