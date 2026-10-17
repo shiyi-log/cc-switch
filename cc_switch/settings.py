@@ -198,19 +198,19 @@ BRIDGE = {
     ),
     # Dynamic routing: score = cost + TTFT + speed + error rate.
     'ROUTING_MODE': os.environ.get('BRIDGE_ROUTING_MODE', 'dynamic'),
-    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.40')),
-    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.30')),
-    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.20')),
+    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.10')),
+    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.55')),
+    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.30')),
     'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.10')),
     'WEIGHT_PRIORITY': float(os.environ.get('BRIDGE_WEIGHT_PRIORITY', '0.0')),
     'STATS_MIN_SAMPLES': int(os.environ.get('BRIDGE_STATS_MIN_SAMPLES', '3')),
     # Fast adaptation: a single slow request should move traffic away.
     'ROUTING_ALPHA': float(os.environ.get('BRIDGE_ROUTING_ALPHA', '0.6')),
-    'SLOW_TTFT_MS': float(os.environ.get('BRIDGE_SLOW_TTFT_MS', '5000')),
+    'SLOW_TTFT_MS': float(os.environ.get('BRIDGE_SLOW_TTFT_MS', '10000')),
     'SLOW_MIN_TPS': float(os.environ.get('BRIDGE_SLOW_MIN_TPS', '15')),
-    'SLOW_PENALTY_SECONDS': int(os.environ.get('BRIDGE_SLOW_PENALTY_SECONDS', '60')),
+    'SLOW_PENALTY_SECONDS': int(os.environ.get('BRIDGE_SLOW_PENALTY_SECONDS', '600')),
     'ROTATION_MARGIN': float(os.environ.get('BRIDGE_ROTATION_MARGIN', '0.5')),
-    'EXPLORE_RATE': float(os.environ.get('BRIDGE_EXPLORE_RATE', '0.3')),
+    'EXPLORE_RATE': float(os.environ.get('BRIDGE_EXPLORE_RATE', '0.1')),
     # Mirror bridge request logs into CC Switch's proxy_request_logs under the
     # real third-party provider id.
     'CC_SWITCH_MIRROR': os.environ.get('BRIDGE_CC_SWITCH_MIRROR', '1') == '1',

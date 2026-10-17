@@ -17,6 +17,7 @@ BRIDGE = {
     "PROBE_TTL_SECONDS": 300,
     "PROBE_REQUIRED": True,
     "PROBE_TIMEOUT_SECONDS": 5,
+    "EXPLORE_RATE": 0,
 }
 
 

@@ -151,9 +151,9 @@ curl http://127.0.0.1:8000/api/health
 - **错误率**：成功率的 EWMA
 - **探索**：样本不足的渠道有 15% 分数加成，避免一开始就被冷落
 
-速度优先：默认权重 `TTFT 0.50 / 速度 0.35 / 价格 0.10 / 错误率 0.05`，优先级权重为 0。
+速度优先：默认权重 `TTFT 0.55 / 速度 0.30 / 价格 0.10 / 错误率 0.05`，优先级权重为 0。
 
-- 首字超过 `BRIDGE_SLOW_TTFT_MS`（默认 5000ms）或生成速度低于 `BRIDGE_SLOW_MIN_TPS`（默认 15）会标记为慢请求，**下一请求立即跳过该渠道 60 秒**
+- 首字超过 `BRIDGE_SLOW_TTFT_MS`（默认 10000ms）或生成速度低于 `BRIDGE_SLOW_MIN_TPS`（默认 15）会标记为慢请求，**下一请求立即跳过该渠道 600 秒**；到期后会重新参与，不会被永久拉黑
 - 在评分接近的候选里按「最久未使用」轮换，并有 `BRIDGE_EXPLORE_RATE`（默认 0.3）概率随机探索
 - 同一 tier 内才做动态比较；官方账号仍优先且受 95% 保留线约束
 - 若某渠道返回「模型不可用」，该账号会被加入 `blocked_models`，本请求自动换下一个渠道
@@ -235,10 +235,10 @@ docker compose logs -f
 | `BRIDGE_WEIGHT_COST` / `WEIGHT_TTFT` / `WEIGHT_SPEED` / `WEIGHT_ERROR` | `0.40/0.30/0.20/0.10` | 动态评分权重 |
 | `BRIDGE_WEIGHT_PRIORITY` | `0.05` | 优先级在评分中的权重 |
 | `BRIDGE_STATS_MIN_SAMPLES` | `3` | 低于该样本数时给予探索加成 |
-| `BRIDGE_SLOW_TTFT_MS` / `BRIDGE_SLOW_MIN_TPS` | `5000` / `15` | 慢请求判定阈值 |
-| `BRIDGE_SLOW_PENALTY_SECONDS` | `60` | 慢请求后跳过该渠道的秒数 |
+| `BRIDGE_SLOW_TTFT_MS` / `BRIDGE_SLOW_MIN_TPS` | `10000` / `15` | 慢请求判定阈值 |
+| `BRIDGE_SLOW_PENALTY_SECONDS` | `600` | 慢请求后跳过该渠道的秒数 |
 | `BRIDGE_ROTATION_MARGIN` | `0.5` | 相近候选的轮换范围 |
-| `BRIDGE_EXPLORE_RATE` | `0.3` | 随机探索概率 |
+| `BRIDGE_EXPLORE_RATE` | `0.1` | 随机探索概率 |
 | `BRIDGE_ROUTING_ALPHA` | `0.6` | 指标 EWMA 响应速度 |
 | `BRIDGE_CC_SWITCH_MIRROR` | `1` | 把请求日志镜像到 CC Switch |
 | `BRIDGE_CC_SWITCH_DB_PATH` | `~/.cc-switch/cc-switch.db` | CC Switch 数据库路径 |

@@ -18,7 +18,7 @@ PRIOR_TTFT_MS = 2000.0
 PRIOR_TPS = 25.0
 PRIOR_COST_PER_1K = 0.02
 EXPLORE_BONUS = 0.85
-SLOW_PENALTY = 2.0
+SLOW_PENALTY = 5.0
 
 
 def _setting(name, default):
@@ -57,7 +57,7 @@ def update_account_stats(
     if output_tokens >= 20 and duration_ms:
         generation_ms = float(duration_ms) - float(ttft_ms or 0)
         if generation_ms >= 200:
-            tps = min(500.0, float(output_tokens) / (generation_ms / 1000.0))
+            tps = min(200.0, float(output_tokens) / (generation_ms / 1000.0))
 
     slow = False
     if ttft is not None and ttft > slow_ttft:
@@ -117,8 +117,14 @@ def _scored(accounts: list[Account], model: str) -> list[tuple[float, Account]]:
     known_tps = [
         a.ewma_tps for a in accounts if a.stats_samples and a.ewma_tps
     ]
+    known_costs = [
+        float(a.ewma_cost_per_1k)
+        for a in accounts
+        if a.stats_samples and a.ewma_cost_per_1k is not None
+    ]
     optimistic_ttft = min(known_ttft) if known_ttft else PRIOR_TTFT_MS
     optimistic_tps = max(known_tps) if known_tps else PRIOR_TPS
+    optimistic_cost = min(known_costs) if known_costs else reference_cost
 
     for account in accounts:
         samples = account.stats_samples or 0
@@ -134,7 +140,7 @@ def _scored(accounts: list[Account], model: str) -> list[tuple[float, Account]]:
         cost = (
             float(account.ewma_cost_per_1k)
             if knows and account.ewma_cost_per_1k is not None
-            else reference_cost * float(account.price_multiplier or 1)
+            else optimistic_cost * float(account.price_multiplier or 1)
         )
         error = 1.0 - (
             account.ewma_success if knows and account.ewma_success is not None else 1.0
@@ -220,8 +226,10 @@ def pick_account(accounts: list[Account], model: str = "") -> Account | None:
     if not eligible:
         eligible = [scored[0][1]]
 
-    if len(eligible) > 1 and random.random() < float(_setting("EXPLORE_RATE", 0.2)):
-        return random.choice(eligible)
+    if len(healthy) > 1 and random.random() < float(_setting("EXPLORE_RATE", 0.3)):
+        # Explore any healthy channel, not only the current top three, so new
+        # providers get measured quickly.
+        return random.choice([account for _, account in healthy])
 
     def last_used(account: Account) -> float:
         return account.last_used_at.timestamp() if account.last_used_at else 0.0
