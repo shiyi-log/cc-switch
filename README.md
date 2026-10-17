@@ -158,6 +158,26 @@ curl http://127.0.0.1:8000/api/health
 - 同一 tier 内才做动态比较；官方账号仍优先且受 95% 保留线约束
 - 若某渠道返回「模型不可用」，该账号会被加入 `blocked_models`，本请求自动换下一个渠道
 
+## 会话看门狗
+
+`scripts/codex_session_watchdog.py` 用于托管一个 Codex 任务会话，区分「任务完成」与「异常停止」：
+
+```bash
+.venv/bin/python scripts/codex_session_watchdog.py \
+  --prompt "完成 xxx 任务" \
+  --cwd /path/to/workspace \
+  --max-restarts 3 \
+  --log .run/watchdog.log --state .run/watchdog-state.json
+```
+
+- 退出码 `0` 且未出现失败标记 → `completed`，不再重启
+- 非 0 退出、被信号终止、或输出出现 `exceeded retry limit` → `abnormal_stop`
+- 异常时用 `codex exec resume <session_id>`（没有 id 时 `--last`）继续，指数退避，超过 `--max-restarts` 标记 `failed`
+- 也支持 `--complete-marker TASK_COMPLETE`，由任务显式声明完成
+- 状态文件记录 `attempts / status / exit_code / session_id`，日志为 JSON Lines
+
+> 看门狗只能托管**由它启动**的会话；已经在跑的交互式会话无法中途接管。
+
 ## 生产部署
 
 ### 直接运行
