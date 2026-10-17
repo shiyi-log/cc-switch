@@ -153,3 +153,25 @@ def test_rotation_prefers_least_recently_used():
     )
     picked = pick_account([fresh, stale], "gpt-6.1-sol")
     assert picked.name == "stale"
+
+
+@override_settings(BRIDGE=BRIDGE)
+@pytest.mark.django_db
+def test_preferred_channel_is_used_before_faster_fallback():
+    preferred = relay("preferred", priority=100, preferred=True, ewma_ttft_ms=4000, stats_samples=5)
+    fallback = relay("fallback", priority=1, ewma_ttft_ms=500, stats_samples=5)
+    account = reserve_next_account(protocols=[Account.PROTOCOL_OPENAI], model="gpt-6.1-sol")
+    assert account.name == "preferred"
+    release_account(account.pk)
+
+
+@override_settings(BRIDGE=BRIDGE)
+@pytest.mark.django_db
+def test_slow_preferred_channel_falls_back():
+    from django.utils import timezone
+
+    relay("preferred", priority=1, preferred=True, ewma_ttft_ms=30000, stats_samples=5, last_slow_at=timezone.now())
+    relay("fallback", priority=50, ewma_ttft_ms=800, stats_samples=5)
+    account = reserve_next_account(protocols=[Account.PROTOCOL_OPENAI], model="gpt-6.1-sol")
+    assert account.name == "fallback"
+    release_account(account.pk)

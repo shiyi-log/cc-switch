@@ -115,6 +115,10 @@ class Account(models.Model):
 
     enabled = models.BooleanField("启用", default=True)
     priority = models.IntegerField("优先级 (越小越先用)", default=100)
+    preferred = models.BooleanField(
+        "优先调用", default=False,
+        help_text="同一 tier 内优先于普通渠道，仍受额度/慢请求约束。",
+    )
     price_multiplier = models.DecimalField(
         "价格系数", max_digits=6, decimal_places=4, default=Decimal("1.0"),
         help_text="按量计费的实际单价系数，用于动态路由比价。",
