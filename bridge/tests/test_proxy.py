@@ -518,3 +518,44 @@ async def test_any_upstream_error_fails_over(bridge_settings):
 
     assert response.status_code == 200
     assert response.json()["id"] == "resp_second"
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_retries_multiple_rounds_until_budget(bridge_settings):
+    bridge_settings.BRIDGE = {
+        **bridge_settings.BRIDGE,
+        "MAX_ATTEMPTS": 4,
+        "RETRY_ROUND_DELAY": 0,
+        "EXPLORE_RATE": 0,
+    }
+    for index, base in enumerate(("https://a.test", "https://b.test")):
+        account = await Account.objects.acreate(
+            name=f"relay{index}",
+            tier=Account.TIER_THIRD_PARTY,
+            protocol=Account.PROTOCOL_OPENAI,
+            auth_type=Account.AUTH_API_KEY,
+            quota_mode=Account.QUOTA_NONE,
+            base_url=base,
+            priority=10 + index,
+        )
+        account.set_credential(f"sk-{index}")
+        await account.asave()
+
+    route_a = respx.post("https://a.test/v1/responses").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+    route_b = respx.post("https://b.test/v1/responses").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 500
+    assert route_a.call_count + route_b.call_count == 4

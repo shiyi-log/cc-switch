@@ -193,6 +193,7 @@ def _candidates(
     now: datetime,
     protocols: list[str] | None = None,
     model: str = "",
+    ignore_cooldown: bool = False,
 ) -> list[Account]:
     if protocols:
         accounts = [account for account in accounts if account.protocol in protocols]
@@ -202,7 +203,9 @@ def _candidates(
             for account in accounts
             if model not in (account.blocked_models or [])
         ]
-    available = [account for account in accounts if account.is_available(now)]
+    available = [
+        account for account in accounts if account.is_available(now, ignore_cooldown)
+    ]
     from .metrics import pick_account, rank_accounts
 
     official = [a for a in available if a.tier == Account.TIER_OFFICIAL]
@@ -220,12 +223,13 @@ def available_accounts(
     now: datetime | None = None,
     protocols: list[str] | None = None,
     model: str = "",
+    ignore_cooldown: bool = False,
 ) -> list[Account]:
     now = now or timezone.now()
     accounts = list(
         Account.objects.filter(enabled=True).prefetch_related("windows").order_by("priority", "name")
     )
-    return _candidates(accounts, now, protocols, model)
+    return _candidates(accounts, now, protocols, model, ignore_cooldown)
 
 
 def reserve_next_account(
@@ -233,6 +237,7 @@ def reserve_next_account(
     now: datetime | None = None,
     protocols: list[str] | None = None,
     model: str = "",
+    ignore_cooldown: bool = False,
 ) -> Account | None:
     """Atomically pick the best account and bump its in-flight counter."""
     now = now or timezone.now()
@@ -244,7 +249,7 @@ def reserve_next_account(
         accounts = list(queryset.prefetch_related("windows").order_by("priority", "name"))
         candidates = [
             a
-            for a in _candidates(accounts, now, protocols, model)
+            for a in _candidates(accounts, now, protocols, model, ignore_cooldown)
             if a.pk not in excluded
         ]
         if not candidates:

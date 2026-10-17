@@ -202,13 +202,13 @@ class Account(models.Model):
     def remaining_ratio(self) -> Decimal:
         return max(Decimal("0"), Decimal("1") - self.utilization())
 
-    def is_available(self, now=None) -> bool:
+    def is_available(self, now=None, ignore_cooldown: bool = False) -> bool:
         now = now or timezone.now()
         if not self.enabled:
             return False
         if self.inflight >= self.max_inflight:
             return False
-        if self.cooldown_until and self.cooldown_until > now:
+        if not ignore_cooldown and self.cooldown_until and self.cooldown_until > now:
             return False
         if self.quota_mode == self.QUOTA_BUDGET and not self.budget_usd:
             return False

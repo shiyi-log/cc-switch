@@ -26,6 +26,7 @@ from .official import refresh_official_quotas
 from .probe import probe_account, refresh_stale_probes
 from .quotas import (
     apply_header_usage,
+    available_accounts,
     mark_failure,
     record_budget_spend,
     release_account,
@@ -270,20 +271,40 @@ async def proxy(request, path: str):
     await refresh_official_quotas()
     await refresh_stale_probes()
 
-    attempted: set = set()
     max_attempts = max(1, int(settings.BRIDGE.get("MAX_ATTEMPTS", 3)))
+    round_delay = float(settings.BRIDGE.get("RETRY_ROUND_DELAY", 0.5))
+    attempts = 0
+    round_no = 0
+    round_excluded: set = set()
     last_error_message = ""
     last_error_status = None
     last_error_content = b""
     last_error_type = "application/json"
 
-    for _ in range(max_attempts):
+    while attempts < max_attempts:
         account = await sync_to_async(reserve_next_account)(
-            attempted, protocols=protocols, model=model
+            round_excluded,
+            protocols=protocols,
+            model=model,
+            ignore_cooldown=round_no > 0,
         )
         if account is None:
-            break
-        attempted.add(account.pk)
+            if attempts == 0:
+                break
+            # All accounts in this round failed; start another round until the
+            # global attempt budget is exhausted. Quota-exhausted accounts are
+            # still filtered out, so this cannot loop forever on dead quota.
+            remaining = await sync_to_async(available_accounts)(
+                protocols=protocols, model=model, ignore_cooldown=True
+            )
+            if not remaining:
+                break
+            round_no += 1
+            round_excluded.clear()
+            await asyncio.sleep(round_delay)
+            continue
+        attempts += 1
+        round_excluded.add(account.pk)
         handed_off = False
         try:
             try:

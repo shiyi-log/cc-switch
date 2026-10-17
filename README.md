@@ -262,7 +262,8 @@ docker compose logs -f
 | `BRIDGE_ROUTING_ALPHA` | `0.6` | 指标 EWMA 响应速度 |
 | `BRIDGE_CC_SWITCH_MIRROR` | `1` | 把请求日志镜像到 CC Switch |
 | `BRIDGE_CC_SWITCH_DB_PATH` | `~/.cc-switch/cc-switch.db` | CC Switch 数据库路径 |
-| `BRIDGE_MAX_ATTEMPTS` | `100` | 单请求最多尝试账号数（实际受渠道数量限制） |
+| `BRIDGE_MAX_ATTEMPTS` | `100` | 单请求最多尝试次数（多轮循环，10 个账号约 10 轮） |
+| `BRIDGE_RETRY_ROUND_DELAY` | `0.5` | 每轮之间的等待秒数 |
 | `BRIDGE_TIMEOUT_SECONDS` | `600` | 上游超时 |
 
 ## 测试
