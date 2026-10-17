@@ -134,6 +134,10 @@ class Account(models.Model):
     ewma_success = models.FloatField("成功率 EWMA", null=True, blank=True)
     stats_samples = models.PositiveIntegerField("样本数", default=0)
     stats_updated_at = models.DateTimeField("指标更新时间", null=True, blank=True)
+    observed_cost_per_1k = models.DecimalField(
+        "供应商实际每千 token 成本", max_digits=12, decimal_places=6,
+        null=True, blank=True,
+    )
     last_slow_at = models.DateTimeField("最近慢请求", null=True, blank=True)
     last_used_at = models.DateTimeField("最近使用", null=True, blank=True)
 

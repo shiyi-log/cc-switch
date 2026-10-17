@@ -137,11 +137,12 @@ def _scored(accounts: list[Account], model: str) -> list[tuple[float, Account]]:
         tps = (
             (account.ewma_tps or optimistic_tps) if knows else optimistic_tps
         )
-        cost = (
-            float(account.ewma_cost_per_1k)
-            if knows and account.ewma_cost_per_1k is not None
-            else optimistic_cost * float(account.price_multiplier or 1)
-        )
+        if account.observed_cost_per_1k is not None:
+            cost = float(account.observed_cost_per_1k)
+        elif knows and account.ewma_cost_per_1k is not None:
+            cost = float(account.ewma_cost_per_1k)
+        else:
+            cost = optimistic_cost * float(account.price_multiplier or 1)
         error = 1.0 - (
             account.ewma_success if knows and account.ewma_success is not None else 1.0
         )
@@ -168,9 +169,9 @@ def _scored(accounts: list[Account], model: str) -> list[tuple[float, Account]]:
     max_priority = max(m["priority"] for m in metrics.values()) or 1.0
 
     # Speed first: TTFT + throughput dominate; price is a tie-breaker.
-    w_cost = float(_setting("WEIGHT_COST", 0.1))
+    w_cost = float(_setting("WEIGHT_COST", 0.2))
     w_ttft = float(_setting("WEIGHT_TTFT", 0.5))
-    w_speed = float(_setting("WEIGHT_SPEED", 0.35))
+    w_speed = float(_setting("WEIGHT_SPEED", 0.25))
     w_error = float(_setting("WEIGHT_ERROR", 0.05))
     w_priority = float(_setting("WEIGHT_PRIORITY", 0.0))
 

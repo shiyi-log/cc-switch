@@ -198,9 +198,9 @@ BRIDGE = {
     ),
     # Dynamic routing: score = cost + TTFT + speed + error rate.
     'ROUTING_MODE': os.environ.get('BRIDGE_ROUTING_MODE', 'dynamic'),
-    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.10')),
-    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.55')),
-    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.30')),
+    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.20')),
+    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.50')),
+    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.25')),
     'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.10')),
     'WEIGHT_PRIORITY': float(os.environ.get('BRIDGE_WEIGHT_PRIORITY', '0.0')),
     'STATS_MIN_SAMPLES': int(os.environ.get('BRIDGE_STATS_MIN_SAMPLES', '3')),

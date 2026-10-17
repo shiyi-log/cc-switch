@@ -131,7 +131,25 @@ async def probe_account(account_id, force: bool = False) -> bool:
     remaining = extract_number(data, paths)
     total = extract_number(data, [probe["total_path"]]) if probe.get("total_path") else None
     active = extract_active(data, probe.get("active_path"))
-    await sync_to_async(record_probe_usage)(account, remaining, total, active)
+
+    # Real provider pricing from /v1/usage model_stats (cost per 1k tokens).
+    cost_per_1k = None
+    stats = data.get("model_stats") if isinstance(data, dict) else None
+    if isinstance(stats, list) and stats:
+        target = next(
+            (item for item in stats if item.get("model") == "gpt-6.1-sol"), None
+        )
+        if target and target.get("total_tokens"):
+            cost_per_1k = float(target.get("cost") or 0) / float(target["total_tokens"]) * 1000.0
+        else:
+            tokens = sum(float(item.get("total_tokens") or 0) for item in stats)
+            cost = sum(float(item.get("cost") or 0) for item in stats)
+            if tokens:
+                cost_per_1k = cost / tokens * 1000.0
+
+    await sync_to_async(record_probe_usage)(
+        account, remaining, total, active, cost_per_1k
+    )
     logger.info(
         "quota probe %s: remaining=%s total=%s active=%s", account.name, remaining, total, active
     )

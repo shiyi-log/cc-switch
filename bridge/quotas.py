@@ -142,7 +142,11 @@ def record_budget_spend(account: Account, cost_usd: Decimal) -> UsageWindow:
 
 
 def record_probe_usage(
-    account: Account, remaining: float | None, total: float | None, active: bool | None
+    account: Account,
+    remaining: float | None,
+    total: float | None,
+    active: bool | None,
+    cost_per_1k: float | None = None,
 ) -> UsageWindow:
     """Persist a third-party balance probe result as a 0..1 utilisation."""
     now = timezone.now()
@@ -172,7 +176,12 @@ def record_probe_usage(
             },
         },
     )
-    Account.objects.filter(pk=account.pk).update(last_probe_at=now, last_probe_error="")
+    update_fields = {"last_probe_at": now, "last_probe_error": ""}
+    if cost_per_1k is not None and cost_per_1k > 0:
+        update_fields["observed_cost_per_1k"] = Decimal(str(cost_per_1k)).quantize(
+            Decimal("0.000001")
+        )
+    Account.objects.filter(pk=account.pk).update(**update_fields)
     return window
 
 
