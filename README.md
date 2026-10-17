@@ -28,3 +28,7 @@ pyproject.toml      # 项目元数据与依赖
 uv.lock             # 依赖锁文件
 .python-version     # 固定 Python 3.12
 ```
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 开源。
