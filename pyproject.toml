@@ -4,5 +4,23 @@ version = "0.1.0"
 description = "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=50.0.2",
     "django>=6.1.2",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.4",
+    "uvicorn>=0.54.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-django>=4.14.0",
+    "respx>=0.23.1",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "cc_switch.settings"
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]

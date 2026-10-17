@@ -10,22 +10,35 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Local development overrides (never commit the .env file itself).
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-bb=+he!&jclidx)3n^11mzix8b!x2wy4$8_h4u=s#^u9y337m9'
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-bb=+he!&jclidx)3n^11mzix8b!x2wy4$8_h4u=s#^u9y337m9',
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', '1') == '1'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',')
+    if host.strip()
+]
 
 
 # Application definition
@@ -37,6 +50,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'bridge.apps.BridgeConfig',
 ]
 
 MIDDLEWARE = [
@@ -123,5 +137,43 @@ STATIC_URL = 'static/'
 MAILERS = {
     'default': {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# CC Switch bridge
+# ---------------------------------------------------------------------------
+
+BRIDGE = {
+    # Clients must send this value via `x-bridge-token`, `Authorization: Bearer`
+    # or `x-api-key`. The bridge refuses to start serving when it is empty.
+    'TOKEN': os.environ.get('BRIDGE_TOKEN', ''),
+    # Passphrase used to encrypt upstream credentials at rest.
+    'ENCRYPTION_KEY': os.environ.get('BRIDGE_ENCRYPTION_KEY', ''),
+    # How many upstream accounts/candidates may be tried for one request.
+    'MAX_ATTEMPTS': int(os.environ.get('BRIDGE_MAX_ATTEMPTS', '3')),
+    'TIMEOUT_SECONDS': float(os.environ.get('BRIDGE_TIMEOUT_SECONDS', '600')),
+    # Reserve ratio per account: the last 5% of the quota is never consumed.
+    'RESERVE_RATIO': os.environ.get('BRIDGE_RESERVE_RATIO', '0.05'),
+    # Extra headroom on top of the reserve, protecting against stale headers.
+    'SAFETY_MARGIN': os.environ.get('BRIDGE_SAFETY_MARGIN', '0.005'),
+    # How long a quota probe result stays fresh for third-party providers.
+    'PROBE_TTL_SECONDS': int(os.environ.get('BRIDGE_PROBE_TTL_SECONDS', '300')),
+    # Refuse to route to a probe-based provider until its balance was read at
+    # least once, otherwise the 5% reserve could not be enforced.
+    'PROBE_REQUIRED': os.environ.get('BRIDGE_PROBE_REQUIRED', '1') == '1',
+    'PROBE_TIMEOUT_SECONDS': float(os.environ.get('BRIDGE_PROBE_TIMEOUT_SECONDS', '8')),
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'bridge': {
+            'handlers': ['console'],
+            'level': os.environ.get('BRIDGE_LOG_LEVEL', 'INFO'),
+        },
     },
 }
