@@ -204,6 +204,13 @@ BRIDGE = {
     'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.10')),
     'WEIGHT_PRIORITY': float(os.environ.get('BRIDGE_WEIGHT_PRIORITY', '0.05')),
     'STATS_MIN_SAMPLES': int(os.environ.get('BRIDGE_STATS_MIN_SAMPLES', '3')),
+    # Mirror bridge request logs into CC Switch's proxy_request_logs under the
+    # real third-party provider id.
+    'CC_SWITCH_MIRROR': os.environ.get('BRIDGE_CC_SWITCH_MIRROR', '1') == '1',
+    'CC_SWITCH_DB_PATH': os.environ.get(
+        'BRIDGE_CC_SWITCH_DB_PATH',
+        str(Path.home() / '.cc-switch' / 'cc-switch.db'),
+    ),
 }
 
 LOGGING = {

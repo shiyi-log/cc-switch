@@ -73,6 +73,10 @@ class Account(models.Model):
         "渠道标签", max_length=100, blank=True, default="",
         help_text="用于日志区分，例如「官方」「pp 主渠道」。",
     )
+    cc_provider_id = models.CharField(
+        "CC Switch provider id", max_length=64, blank=True, default="",
+        help_text="镜像日志到 CC Switch 时使用的供应商 id。",
+    )
     tier = models.CharField(
         "层级", max_length=20, choices=TIER_CHOICES, default=TIER_OFFICIAL
     )

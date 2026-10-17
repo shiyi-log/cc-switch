@@ -19,6 +19,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Account, RequestLog
+from .ccswitch import mirror_request
 from .metrics import update_account_stats
 from .official import refresh_official_quotas
 from .probe import probe_account, refresh_stale_probes
@@ -153,6 +154,22 @@ def _log_request(**fields) -> None:
         fields.setdefault("tier", account.tier)
         fields.setdefault("base_url", account.base_url)
     RequestLog.objects.create(**fields)
+    if account is not None:
+        mirror_request(
+            account=account,
+            request_id=fields.get("request_id", ""),
+            path=fields.get("path", ""),
+            model=fields.get("model", ""),
+            status_code=fields.get("status_code"),
+            error_message=fields.get("blocked_reason", ""),
+            input_tokens=fields.get("input_tokens", 0),
+            output_tokens=fields.get("output_tokens", 0),
+            cache_read_tokens=fields.get("cache_read_tokens", 0),
+            cache_write_tokens=fields.get("cache_write_tokens", 0),
+            cost_usd=fields.get("cost_usd"),
+            duration_ms=fields.get("duration_ms"),
+            ttft_ms=fields.get("ttft_ms"),
+        )
 
 
 async def _record(
@@ -298,6 +315,13 @@ async def proxy(request, path: str):
             content = await response.aread()
             status_code = response.status_code
             message = _extract_error_message(content)
+            if status_code and status_code >= 400:
+                logger.warning(
+                    "upstream %s from %s: %s",
+                    status_code,
+                    account.name,
+                    content[:1500].decode("utf-8", "replace"),
+                )
             last_error_message = message
             await _close(client, response)
 
@@ -350,6 +374,20 @@ async def proxy(request, path: str):
 async def _success(account, client, response, request, path, request_id, model, started):
     content_type = response.headers.get("content-type", "application/json")
     headers = _copy_headers(response)
+
+    # Write a placeholder row immediately so the call is visible even when a
+    # streaming client disconnects before the usage finalizer runs.
+    try:
+        await sync_to_async(mirror_request)(
+            account=account,
+            request_id=request_id,
+            path=path,
+            model=model,
+            status_code=response.status_code,
+            duration_ms=0,
+        )
+    except Exception:  # pragma: no cover - mirroring is best effort
+        logger.exception("failed to mirror request start")
 
     if "text/event-stream" in content_type:
         parser = SSEUsageParser()

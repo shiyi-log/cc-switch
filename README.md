@@ -127,6 +127,14 @@ curl http://127.0.0.1:8000/api/health
 ```
 
 请求日志按 `channel`（渠道标签）、`account`、`tier`、`base_url` 分开记录，可通过 `channel` / `account` 参数过滤。
+
+### 镜像到 CC Switch
+
+设置 `BRIDGE_CC_SWITCH_MIRROR=1`（默认开启）后，桥会把每次调用按账号的 `cc_provider_id` 写入 CC Switch 的 `proxy_request_logs`，这样在 CC Switch 界面里能直接按真实供应商（pp.dog / wdlink 等）看到调用、token 和状态。
+
+- `cc_provider_id` 在账号编辑页填写，对应 CC Switch 里的 `providers.id`
+- 写入是 best-effort，CC Switch 数据库不可用时不会影响代理
+- CC Switch 自身代理日志仍可能同时存在（`provider_id` 为桥），造成重复；可在 `proxy_config.enable_logging` 里关闭
 渠道标签在账号编辑页填写；注意它只用于桥侧日志区分，中转站内部的渠道对客户端不可见。
 
 返回每个账号的 tier、额度模式、各窗口利用率、剩余比例、保留线、冷却状态与最近错误。
@@ -220,6 +228,8 @@ docker compose logs -f
 | `BRIDGE_WEIGHT_COST` / `WEIGHT_TTFT` / `WEIGHT_SPEED` / `WEIGHT_ERROR` | `0.40/0.30/0.20/0.10` | 动态评分权重 |
 | `BRIDGE_WEIGHT_PRIORITY` | `0.05` | 优先级在评分中的权重 |
 | `BRIDGE_STATS_MIN_SAMPLES` | `3` | 低于该样本数时给予探索加成 |
+| `BRIDGE_CC_SWITCH_MIRROR` | `1` | 把请求日志镜像到 CC Switch |
+| `BRIDGE_CC_SWITCH_DB_PATH` | `~/.cc-switch/cc-switch.db` | CC Switch 数据库路径 |
 | `BRIDGE_MAX_ATTEMPTS` | `3` | 单请求最多尝试账号数 |
 | `BRIDGE_TIMEOUT_SECONDS` | `600` | 上游超时 |
 
