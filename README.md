@@ -264,6 +264,8 @@ docker compose logs -f
 | `BRIDGE_CC_SWITCH_DB_PATH` | `~/.cc-switch/cc-switch.db` | CC Switch 数据库路径 |
 | `BRIDGE_MAX_ATTEMPTS` | `100` | 单请求最多尝试次数（多轮循环，10 个账号约 10 轮） |
 | `BRIDGE_RETRY_ROUND_DELAY` | `0.5` | 每轮之间的等待秒数 |
+| `BRIDGE_POOL_MODE` | `1` | 上游为号池模式：失败只做秒级冷却，允许反复重试同渠道 |
+| `BRIDGE_POOL_COOLDOWN_SECONDS` | `5` | 号池模式下单次失败的冷却秒数（429 翻倍） |
 | `BRIDGE_TIMEOUT_SECONDS` | `600` | 上游超时 |
 
 ## 测试

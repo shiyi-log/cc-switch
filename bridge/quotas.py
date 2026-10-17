@@ -268,7 +268,10 @@ def release_account(account_id) -> None:
 
 def mark_failure(account_id, message: str, status_code: int | None = None) -> None:
     now = timezone.now()
-    if status_code in (401, 403):
+    if settings.BRIDGE.get("POOL_MODE", True):
+        base = int(settings.BRIDGE.get("POOL_COOLDOWN_SECONDS", 5))
+        cooldown = timedelta(seconds=base if status_code != 429 else base * 2)
+    elif status_code in (401, 403):
         cooldown = timedelta(minutes=10)
     elif status_code == 429:
         cooldown = timedelta(seconds=60)

@@ -173,6 +173,10 @@ BRIDGE = {
     # How many upstream accounts/candidates may be tried for one request.
     'MAX_ATTEMPTS': int(os.environ.get('BRIDGE_MAX_ATTEMPTS', '100')),
     'RETRY_ROUND_DELAY': float(os.environ.get('BRIDGE_RETRY_ROUND_DELAY', '0.5')),
+    # Upstreams are account pools: a failed request may just have landed on a
+    # bad pooled account, so keep cooldowns short and retry the same channel.
+    'POOL_MODE': os.environ.get('BRIDGE_POOL_MODE', '1') == '1',
+    'POOL_COOLDOWN_SECONDS': int(os.environ.get('BRIDGE_POOL_COOLDOWN_SECONDS', '5')),
     'TIMEOUT_SECONDS': float(os.environ.get('BRIDGE_TIMEOUT_SECONDS', '600')),
     # Reserve ratio per account: the last 5% of the quota is never consumed.
     'RESERVE_RATIO': os.environ.get('BRIDGE_RESERVE_RATIO', '0.05'),
