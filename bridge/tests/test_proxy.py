@@ -246,3 +246,73 @@ async def test_status_reports_reserve_limit(bridge_settings):
     account = response.json()["accounts"][0]
     assert account["limit"] == pytest.approx(0.945)
     assert account["available"] is True
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_proxy_routes_openai_responses(bridge_settings):
+    account = await Account.objects.acreate(
+        name="pp",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_PROBE,
+        base_url="https://pp.test",
+        budget_usd=Decimal("100"),
+    )
+    account.set_credential("sk-pp")
+    await account.asave()
+    await UsageWindow.objects.acreate(
+        account=account, key=UsageWindow.PROBE, utilization=Decimal("0.10")
+    )
+
+    route = respx.post("https://pp.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": "resp_1",
+                "object": "response",
+                "model": "gpt-6.1-sol",
+                "usage": {"input_tokens": 5, "output_tokens": 3},
+            },
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "resp_1"
+    upstream_request = route.calls[0].request
+    assert upstream_request.headers["authorization"] == "Bearer sk-pp"
+    assert "anthropic-version" not in upstream_request.headers
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_anthropic_request_without_anthropic_account_returns_503(bridge_settings):
+    account = await Account.objects.acreate(
+        name="pp",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://pp.test",
+    )
+    account.set_credential("sk-pp")
+    await account.asave()
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/messages",
+        data=json.dumps({"model": "claude-sonnet-4-5", "max_tokens": 8, "messages": []}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 503
+    assert "anthropic" in response.json()["error"]["message"]

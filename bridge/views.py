@@ -71,6 +71,14 @@ async def _read_body(request) -> bytes:
     return request.body
 
 
+def _protocol_for_path(path: str) -> str | None:
+    if path == "messages" or path.startswith("messages/"):
+        return Account.PROTOCOL_ANTHROPIC
+    if path.startswith("responses") or path.startswith("chat/completions"):
+        return Account.PROTOCOL_OPENAI
+    return None
+
+
 def _extract_error_message(content: bytes) -> str:
     try:
         payload = json.loads(content)
@@ -163,7 +171,7 @@ async def proxy(request, path: str):
         return _error(400, "invalid_request_error", "Request body must be a JSON object")
 
     model = str(payload.get("model") or "")
-    wants_stream = bool(payload.get("stream"))
+    protocol = _protocol_for_path(path)
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     started = time.monotonic()
     path_only = f"/v1/{path}"
@@ -176,71 +184,81 @@ async def proxy(request, path: str):
     last_error_message = ""
 
     for _ in range(max_attempts):
-        account = await sync_to_async(reserve_next_account)(attempted)
+        account = await sync_to_async(reserve_next_account)(attempted, protocol=protocol)
         if account is None:
             break
         attempted.add(account.pk)
+        handed_off = False
         try:
-            client, response = await _send(account, request, body, path_only)
-        except Exception as exc:  # noqa: BLE001 - network failures are retried
-            logger.warning("upstream request failed for %s: %s", account.name, exc)
-            last_error_message = str(exc)
-            await sync_to_async(mark_failure)(account.pk, str(exc))
-            await sync_to_async(release_account)(account.pk)
+            try:
+                client, response = await _send(account, request, body, path_only)
+            except Exception as exc:  # noqa: BLE001 - network failures are retried
+                logger.warning("upstream request failed for %s: %s", account.name, exc)
+                last_error_message = str(exc)
+                await sync_to_async(mark_failure)(account.pk, str(exc))
+                await sync_to_async(_log_request)(
+                    account=account,
+                    request_id=request_id,
+                    path=path_only,
+                    model=model,
+                    status_code=None,
+                    blocked_reason=f"transport: {exc}",
+                )
+                continue
+
+            try:
+                await sync_to_async(apply_header_usage)(account, response.headers)
+            except Exception:  # pragma: no cover - defensive
+                logger.exception("failed to persist quota headers")
+
+            if response.status_code < 400:
+                result = await _success(
+                    account, client, response, request, path_only, request_id, model, started
+                )
+                # Streaming responses release the account in their generator.
+                handed_off = isinstance(result, StreamingHttpResponse)
+                return result
+
+            content = await response.aread()
+            status_code = response.status_code
+            message = _extract_error_message(content)
+            last_error_message = message
+            await _close(client, response)
+
+            retryable = status_code in RETRYABLE_STATUS
+            if retryable:
+                await sync_to_async(mark_failure)(account.pk, message, status_code)
             await sync_to_async(_log_request)(
                 account=account,
                 request_id=request_id,
                 path=path_only,
                 model=model,
-                status_code=None,
-                blocked_reason=f"transport: {exc}",
-            )
-            continue
-
-        try:
-            await sync_to_async(apply_header_usage)(account, response.headers)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("failed to persist quota headers")
-
-        if response.status_code < 400:
-            return await _success(
-                account, client, response, request, path_only, request_id, model, started
+                status_code=status_code,
+                blocked_reason=message,
             )
 
-        content = await response.aread()
-        status_code = response.status_code
-        message = _extract_error_message(content)
-        last_error_message = message
-        await _close(client, response)
+            if not retryable:
+                headers = _copy_headers(response)
+                return HttpResponse(
+                    content,
+                    status=status_code,
+                    content_type=response.headers.get("content-type", "application/json"),
+                    headers=headers,
+                )
+        finally:
+            if not handed_off:
+                await sync_to_async(release_account)(account.pk)
 
-        retryable = status_code in RETRYABLE_STATUS
-        if retryable:
-            await sync_to_async(mark_failure)(account.pk, message, status_code)
-        await sync_to_async(_log_request)(
-            account=account,
-            request_id=request_id,
-            path=path_only,
-            model=model,
-            status_code=status_code,
-            blocked_reason=message,
-        )
-        await sync_to_async(release_account)(account.pk)
-
-        if not retryable:
-            headers = _copy_headers(response)
-            return HttpResponse(
-                content,
-                status=status_code,
-                content_type=response.headers.get("content-type", "application/json"),
-                headers=headers,
-            )
-
-    total = await sync_to_async(Account.objects.filter(enabled=True).count)()
+    account_query = Account.objects.filter(enabled=True)
+    if protocol:
+        account_query = account_query.filter(protocol=protocol)
+    total = await sync_to_async(account_query.count)()
     if total == 0:
         return _error(
             503,
             "overloaded_error",
-            "No enabled upstream account is configured",
+            "No enabled upstream account is configured for protocol "
+            f"{protocol or 'any'}",
         )
     return _error(
         429,
@@ -266,21 +284,18 @@ async def _success(account, client, response, request, path, request_id, model, 
             except Exception as exc:  # noqa: BLE001 - client disconnect etc.
                 logger.warning("stream aborted for %s: %s", account.name, exc)
             finally:
-                await _close(client, response)
-                usage = parser.usage
-                if not model:
-                    model_final = parser.model
-                else:
-                    model_final = model
-                await _record(
-                    account,
-                    request_id=request_id,
-                    path=path,
-                    model=model_final,
-                    status_code=response.status_code,
-                    usage=usage,
-                )
-                await sync_to_async(release_account)(account.pk)
+                try:
+                    await _close(client, response)
+                    await _record(
+                        account,
+                        request_id=request_id,
+                        path=path,
+                        model=model or parser.model,
+                        status_code=response.status_code,
+                        usage=parser.usage,
+                    )
+                finally:
+                    await sync_to_async(release_account)(account.pk)
 
         streaming = StreamingHttpResponse(
             stream_body(), status=response.status_code, content_type=content_type
@@ -309,7 +324,6 @@ async def _success(account, client, response, request, path, request_id, model, 
         status_code=status_code,
         usage=usage,
     )
-    await sync_to_async(release_account)(account.pk)
     return HttpResponse(content, status=status_code, content_type=content_type, headers=headers)
 
 

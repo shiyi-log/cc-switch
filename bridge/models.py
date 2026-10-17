@@ -38,6 +38,13 @@ class Account(models.Model):
         (TIER_THIRD_PARTY, "第三方供应商"),
     ]
 
+    PROTOCOL_ANTHROPIC = "anthropic"
+    PROTOCOL_OPENAI = "openai"
+    PROTOCOL_CHOICES = [
+        (PROTOCOL_ANTHROPIC, "Anthropic /v1/messages"),
+        (PROTOCOL_OPENAI, "OpenAI /v1/responses"),
+    ]
+
     AUTH_OAUTH = "oauth"
     AUTH_API_KEY = "api_key"
     AUTH_CHOICES = [
@@ -60,6 +67,9 @@ class Account(models.Model):
     name = models.CharField("名称", max_length=100, unique=True)
     tier = models.CharField(
         "层级", max_length=20, choices=TIER_CHOICES, default=TIER_OFFICIAL
+    )
+    protocol = models.CharField(
+        "上游协议", max_length=20, choices=PROTOCOL_CHOICES, default=PROTOCOL_ANTHROPIC
     )
     auth_type = models.CharField(
         "认证方式", max_length=20, choices=AUTH_CHOICES, default=AUTH_OAUTH

@@ -22,8 +22,31 @@ def upstream_url(account: Account, path: str) -> str:
     return base + path
 
 
+OPENAI_FORWARD_HEADERS = (
+    "content-type",
+    "accept",
+    "user-agent",
+    "openai-beta",
+    "originator",
+    "session_id",
+    "conversation_id",
+    "chatgpt-account-id",
+)
+
+
 def build_upstream_headers(account: Account, incoming) -> dict[str, str]:
     """Copy the client headers that matter and swap in the account credentials."""
+    if account.protocol == Account.PROTOCOL_OPENAI:
+        headers: dict[str, str] = {}
+        for key in OPENAI_FORWARD_HEADERS:
+            value = incoming.get(key)
+            if value:
+                headers[key] = value
+        headers["authorization"] = f"Bearer {account.credential_plain}"
+        for key, value in (account.extra_headers or {}).items():
+            headers[str(key)] = str(value)
+        return headers
+
     headers: dict[str, str] = {}
     content_type = incoming.get("content-type")
     if content_type:
@@ -128,7 +151,27 @@ class SSEUsageParser:
         if not isinstance(event, dict):
             return
         event_type = event.get("type")
-        if event_type == "message_start":
+        if event_type in (
+            "response.created",
+            "response.in_progress",
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        ):
+            response = event.get("response") or {}
+            self.model = response.get("model") or self.model
+            usage = response.get("usage") or {}
+            if usage:
+                self._merge_usage(
+                    {
+                        "input_tokens": usage.get("input_tokens"),
+                        "output_tokens": usage.get("output_tokens"),
+                        "cache_read_input_tokens": (
+                            usage.get("input_tokens_details") or {}
+                        ).get("cached_tokens"),
+                    }
+                )
+        elif event_type == "message_start":
             message = event.get("message") or {}
             self.model = message.get("model") or self.model
             self._merge_usage(message.get("usage"))

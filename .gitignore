@@ -30,3 +30,6 @@ media/
 .DS_Store
 .idea/
 .vscode/
+
+# Local runtime artifacts
+.run/

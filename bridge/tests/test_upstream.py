@@ -90,3 +90,45 @@ def test_sse_parser_ignores_non_data_lines():
     parser.feed(b"event: ping\ndata: not-json\n\n")
     parser.finish()
     assert parser.usage == {}
+
+
+def test_openai_headers_use_bearer_and_drop_anthropic_headers():
+    account = Account(
+        protocol=Account.PROTOCOL_OPENAI, auth_type=Account.AUTH_API_KEY
+    )
+    account.set_credential("sk-pp")
+    headers = build_upstream_headers(
+        account,
+        {
+            "x-api-key": "bridge-token",
+            "anthropic-version": "2023-06-01",
+            "openai-beta": "responses=experimental",
+            "session_id": "sess-1",
+        },
+    )
+    assert headers["authorization"] == "Bearer sk-pp"
+    assert headers["openai-beta"] == "responses=experimental"
+    assert headers["session_id"] == "sess-1"
+    assert "x-api-key" not in headers
+    assert "anthropic-version" not in headers
+
+
+def test_sse_parser_extracts_openai_responses_usage():
+    parser = SSEUsageParser()
+    parser.feed(
+        b'event: response.created\n'
+        b'data: {"type":"response.created","response":{"model":"gpt-6.1-sol"}}\n\n'
+    )
+    parser.feed(
+        b'event: response.completed\n'
+        b'data: {"type":"response.completed","response":{"model":"gpt-6.1-sol",'
+        b'"usage":{"input_tokens":100,"output_tokens":20,'
+        b'"input_tokens_details":{"cached_tokens":40}}}}\n\n'
+    )
+    parser.finish()
+    assert parser.model == "gpt-6.1-sol"
+    assert parser.usage == {
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "cache_read_input_tokens": 40,
+    }

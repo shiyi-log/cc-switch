@@ -179,7 +179,11 @@ def record_probe_usage(
 # ---------------------------------------------------------------------------
 # Selection
 # ---------------------------------------------------------------------------
-def _candidates(accounts: list[Account], now: datetime) -> list[Account]:
+def _candidates(
+    accounts: list[Account], now: datetime, protocol: str | None = None
+) -> list[Account]:
+    if protocol:
+        accounts = [account for account in accounts if account.protocol == protocol]
     available = [account for account in accounts if account.is_available(now)]
     official = sorted(
         (a for a in available if a.tier == Account.TIER_OFFICIAL),
@@ -192,15 +196,19 @@ def _candidates(accounts: list[Account], now: datetime) -> list[Account]:
     return official + third_party
 
 
-def available_accounts(now: datetime | None = None) -> list[Account]:
+def available_accounts(
+    now: datetime | None = None, protocol: str | None = None
+) -> list[Account]:
     now = now or timezone.now()
     accounts = list(
         Account.objects.filter(enabled=True).prefetch_related("windows").order_by("priority", "name")
     )
-    return _candidates(accounts, now)
+    return _candidates(accounts, now, protocol)
 
 
-def reserve_next_account(exclude_ids=(), now: datetime | None = None) -> Account | None:
+def reserve_next_account(
+    exclude_ids=(), now: datetime | None = None, protocol: str | None = None
+) -> Account | None:
     """Atomically pick the best account and bump its in-flight counter."""
     now = now or timezone.now()
     excluded = set(exclude_ids)
@@ -209,7 +217,9 @@ def reserve_next_account(exclude_ids=(), now: datetime | None = None) -> Account
         if connection.features.has_select_for_update:
             queryset = queryset.select_for_update()
         accounts = list(queryset.prefetch_related("windows").order_by("priority", "name"))
-        candidates = [a for a in _candidates(accounts, now) if a.pk not in excluded]
+        candidates = [
+            a for a in _candidates(accounts, now, protocol) if a.pk not in excluded
+        ]
         if not candidates:
             return None
         account = candidates[0]
