@@ -32,7 +32,7 @@ uv run uvicorn cc_switch.asgi:application --host 127.0.0.1 --port 8000
 | Claude Code 订阅 | `official` | `oauth` | `headers` | 填 access token，额度取自响应头 |
 | Anthropic API Key | `official` | `api_key` | `budget` | 填预算 `budget_usd`，按 token 成本累计 |
 | 官方 ChatGPT (Codex) | `official` | `oauth` | `official` | 从 `~/.codex/auth.json` 读 token，按 `wham/usage` 判定 95% |
-| 第三方供应商 | `third_party` | `api_key` | `probe` | 填 `base_url` 与余额查询配置；`channel` 可填渠道标签用于日志区分 |
+| 第三方供应商 | `third_party` | `api_key` | `probe` | 填 `base_url` 与余额查询配置；`channel` 可填渠道标签；`reserve_ratio` 建议设 `0` |
 
 凭据在保存时用 Fernet 加密（密钥来自 `BRIDGE_ENCRYPTION_KEY`，未配置时回退到 `DJANGO_SECRET_KEY`）。
 
@@ -78,14 +78,22 @@ curl -H "x-bridge-token: $BRIDGE_TOKEN" \
 
 ## 保留线规则
 
+默认策略是**官方账号保护、第三方不保护**：
+
+| tier | `reserve_ratio` | `safety_margin` | 行为 |
+| --- | --- | --- | --- |
+| `official` | `0.05` | `0.005` | 用到 94.5% 即停，保留最后 5% |
+| `third_party` | `0` | `0` | 不预留，余额耗尽（利用率 100%）才跳过 |
+
 ```
-limit = 1 - reserve_ratio - safety_margin   # 默认 1 - 0.05 - 0.005 = 94.5%
+limit = 1 - reserve_ratio - safety_margin
 ```
 
 - 任一窗口（5h / 7d / 预算 / 余额）利用率 ≥ `limit`，账号即被跳过
-- 官方账号全部到线 → 使用第三方供应商；第三方也到线 → `429 rate_limit_error`
+- 官方账号全部到线 → 使用第三方供应商；第三方余额也耗尽 → `429 rate_limit_error`
 - `inflight` 达到 `max_inflight` 的账号暂时不再接新请求，减少并发越线
 - `probe` 模式必须先成功查到一次余额（`BRIDGE_PROBE_REQUIRED=1`），否则不会路由，避免“额度未知却继续花”
+- 新建账号的 `BRIDGE_RESERVE_RATIO` 只是默认值，第三方账号建议在后台显式改为 `0`
 
 ### 官方 ChatGPT 账号（Codex）
 
@@ -201,7 +209,7 @@ docker compose logs -f
 | `DJANGO_DB_PATH` | `db.sqlite3` | SQLite 文件路径，容器内为 `/data/db.sqlite3` |
 | `BRIDGE_TOKEN` | 空 | **必填**，为空时拒绝所有代理请求 |
 | `BRIDGE_ENCRYPTION_KEY` | 空 | 凭据加密口令 |
-| `BRIDGE_RESERVE_RATIO` | `0.05` | 保留比例 |
+| `BRIDGE_RESERVE_RATIO` | `0.05` | 新建账号的默认保留比例（官方 0.05，第三方建议 0） |
 | `BRIDGE_SAFETY_MARGIN` | `0.005` | 安全余量 |
 | `BRIDGE_PROBE_TTL_SECONDS` | `300` | 余额查询缓存 |
 | `BRIDGE_PROBE_REQUIRED` | `1` | 无余额数据时禁止路由 |
