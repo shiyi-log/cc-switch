@@ -171,7 +171,7 @@ BRIDGE = {
     # Passphrase used to encrypt upstream credentials at rest.
     'ENCRYPTION_KEY': os.environ.get('BRIDGE_ENCRYPTION_KEY', ''),
     # How many upstream accounts/candidates may be tried for one request.
-    'MAX_ATTEMPTS': int(os.environ.get('BRIDGE_MAX_ATTEMPTS', '3')),
+    'MAX_ATTEMPTS': int(os.environ.get('BRIDGE_MAX_ATTEMPTS', '100')),
     'TIMEOUT_SECONDS': float(os.environ.get('BRIDGE_TIMEOUT_SECONDS', '600')),
     # Reserve ratio per account: the last 5% of the quota is never consumed.
     'RESERVE_RATIO': os.environ.get('BRIDGE_RESERVE_RATIO', '0.05'),
