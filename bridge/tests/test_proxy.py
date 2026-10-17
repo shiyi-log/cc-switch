@@ -316,3 +316,33 @@ async def test_anthropic_request_without_anthropic_account_returns_503(bridge_se
     )
     assert response.status_code == 503
     assert "anthropic" in response.json()["error"]["message"]
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_logs_endpoint_separates_channels(bridge_settings):
+    account = await make_official()
+    account.channel = "official"
+    await account.asave()
+    await RequestLog.objects.acreate(
+        account=account,
+        account_name=account.name,
+        channel="official",
+        tier=Account.TIER_OFFICIAL,
+        base_url="https://api.anthropic.com",
+        path="/v1/messages",
+        model="claude-sonnet-4-5",
+        status_code=200,
+    )
+
+    client = AsyncClient()
+    response = await client.get(
+        "/api/logs?channel=official", headers={"x-bridge-token": "test-token"}
+    )
+    assert response.status_code == 200
+    logs = response.json()["logs"]
+    assert logs and logs[0]["channel"] == "official"
+
+    empty = await client.get(
+        "/api/logs?channel=other", headers={"x-bridge-token": "test-token"}
+    )
+    assert empty.json()["logs"] == []

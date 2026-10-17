@@ -134,6 +134,12 @@ async def _close(client: httpx.AsyncClient, response: httpx.Response) -> None:
 
 
 def _log_request(**fields) -> None:
+    account = fields.get("account")
+    if account is not None:
+        fields.setdefault("account_name", account.name)
+        fields.setdefault("channel", account.channel)
+        fields.setdefault("tier", account.tier)
+        fields.setdefault("base_url", account.base_url)
     RequestLog.objects.create(**fields)
 
 
@@ -382,6 +388,7 @@ async def status(request):
             payload.append(
                 {
                     "name": account.name,
+                    "channel": account.channel,
                     "tier": account.tier,
                     "auth_type": account.auth_type,
                     "quota_mode": account.quota_mode,
@@ -402,6 +409,48 @@ async def status(request):
         return payload
 
     return JsonResponse({"accounts": await sync_to_async(snapshot)()})
+
+
+@csrf_exempt
+async def logs(request):
+    if not _authorized(request):
+        return _error(401, "authentication_error", "Invalid or missing bridge token")
+
+    try:
+        limit = min(max(int(request.GET.get("limit", 50)), 1), 500)
+    except ValueError:
+        return _error(400, "invalid_request_error", "limit must be an integer")
+
+    def snapshot():
+        queryset = RequestLog.objects.select_related("account").order_by("-created_at")
+        channel = request.GET.get("channel")
+        account_name = request.GET.get("account")
+        if channel:
+            queryset = queryset.filter(channel=channel)
+        if account_name:
+            queryset = queryset.filter(account_name=account_name)
+        rows = []
+        for log in queryset[:limit]:
+            rows.append(
+                {
+                    "time": log.created_at.isoformat(),
+                    "channel": log.channel,
+                    "account": log.account_name,
+                    "tier": log.tier,
+                    "base_url": log.base_url,
+                    "path": log.path,
+                    "model": log.model,
+                    "status": log.status_code,
+                    "blocked_reason": log.blocked_reason,
+                    "input_tokens": log.input_tokens,
+                    "output_tokens": log.output_tokens,
+                    "cache_read_tokens": log.cache_read_tokens,
+                    "cost_usd": str(log.cost_usd) if log.cost_usd is not None else None,
+                }
+            )
+        return rows
+
+    return JsonResponse({"logs": await sync_to_async(snapshot)()})
 
 
 async def health(request):

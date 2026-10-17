@@ -32,7 +32,7 @@ uv run uvicorn cc_switch.asgi:application --host 127.0.0.1 --port 8000
 | Claude Code 订阅 | `official` | `oauth` | `headers` | 填 access token，额度取自响应头 |
 | Anthropic API Key | `official` | `api_key` | `budget` | 填预算 `budget_usd`，按 token 成本累计 |
 | 官方 ChatGPT (Codex) | `official` | `oauth` | `official` | 从 `~/.codex/auth.json` 读 token，按 `wham/usage` 判定 95% |
-| 第三方供应商 | `third_party` | `api_key` | `probe` | 填 `base_url` 与余额查询配置 |
+| 第三方供应商 | `third_party` | `api_key` | `probe` | 填 `base_url` 与余额查询配置；`channel` 可填渠道标签用于日志区分 |
 
 凭据在保存时用 Fernet 加密（密钥来自 `BRIDGE_ENCRYPTION_KEY`，未配置时回退到 `DJANGO_SECRET_KEY`）。
 
@@ -113,8 +113,13 @@ export ANTHROPIC_AUTH_TOKEN=<BRIDGE_TOKEN>
 ```bash
 curl -H "x-bridge-token: $BRIDGE_TOKEN" http://127.0.0.1:8000/api/status
 curl -H "x-bridge-token: $BRIDGE_TOKEN" "http://127.0.0.1:8000/api/status?refresh=1"
+curl "http://127.0.0.1:8000/api/logs?limit=50" -H "x-bridge-token: $BRIDGE_TOKEN"
+curl "http://127.0.0.1:8000/api/logs?channel=pp.dog" -H "x-bridge-token: $BRIDGE_TOKEN"
 curl http://127.0.0.1:8000/api/health
 ```
+
+请求日志按 `channel`（渠道标签）、`account`、`tier`、`base_url` 分开记录，可通过 `channel` / `account` 参数过滤。
+渠道标签在账号编辑页填写；注意它只用于桥侧日志区分，中转站内部的渠道对客户端不可见。
 
 返回每个账号的 tier、额度模式、各窗口利用率、剩余比例、保留线、冷却状态与最近错误。
 

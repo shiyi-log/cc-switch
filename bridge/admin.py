@@ -39,6 +39,7 @@ class AccountAdmin(admin.ModelAdmin):
     form = AccountAdminForm
     list_display = (
         "name",
+        "channel",
         "tier",
         "auth_type",
         "quota_mode",
@@ -76,7 +77,8 @@ class ModelPriceAdmin(admin.ModelAdmin):
 class RequestLogAdmin(admin.ModelAdmin):
     list_display = (
         "created_at",
-        "account",
+        "channel",
+        "account_name",
         "model",
         "status_code",
         "blocked_reason",
@@ -84,7 +86,7 @@ class RequestLogAdmin(admin.ModelAdmin):
         "output_tokens",
         "cost_usd",
     )
-    list_filter = ("status_code", "model")
+    list_filter = ("channel", "tier", "status_code", "model")
     search_fields = ("request_id", "model", "blocked_reason")
     readonly_fields = [field.name for field in RequestLog._meta.fields]
 

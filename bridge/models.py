@@ -69,6 +69,10 @@ class Account(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField("名称", max_length=100, unique=True)
+    channel = models.CharField(
+        "渠道标签", max_length=100, blank=True, default="",
+        help_text="用于日志区分，例如「官方」「pp 主渠道」。",
+    )
     tier = models.CharField(
         "层级", max_length=20, choices=TIER_CHOICES, default=TIER_OFFICIAL
     )
@@ -239,6 +243,10 @@ class RequestLog(models.Model):
     account = models.ForeignKey(
         Account, on_delete=models.SET_NULL, null=True, blank=True, related_name="requests"
     )
+    account_name = models.CharField(max_length=100, blank=True, default="")
+    channel = models.CharField(max_length=100, blank=True, default="")
+    tier = models.CharField(max_length=20, blank=True, default="")
+    base_url = models.CharField(max_length=255, blank=True, default="")
     request_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
     path = models.CharField(max_length=255, blank=True, default="")
     model = models.CharField(max_length=120, blank=True, default="")

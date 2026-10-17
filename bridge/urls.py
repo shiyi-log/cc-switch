@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path("api/health", views.health, name="bridge-health"),
     path("api/status", views.status, name="bridge-status"),
+    path("api/logs", views.logs, name="bridge-logs"),
     path(
         "api/accounts/<uuid:account_id>/refresh",
         views.refresh_account,
