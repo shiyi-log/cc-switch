@@ -107,6 +107,61 @@ curl http://127.0.0.1:8000/api/health
 
 返回每个账号的 tier、额度模式、各窗口利用率、剩余比例、保留线、冷却状态与最近错误。
 
+## 生产部署
+
+### 直接运行
+
+```bash
+uv sync --frozen --no-dev
+cp .env.example .env          # 设 DJANGO_DEBUG=0，并修改 SECRET_KEY / BRIDGE_TOKEN
+uv run python manage.py migrate
+uv run python manage.py collectstatic --noinput
+uv run uvicorn cc_switch.asgi:application --host 127.0.0.1 --port 8000 --workers 1
+```
+
+- 内置 SQLite 与按进程的并发计数，建议 `--workers 1`；需要横向扩展时改用 PostgreSQL 并复核并发控制
+- 生产环境必须设置 `DJANGO_ALLOWED_HOSTS`，HTTPS 域名还要设置 `DJANGO_CSRF_TRUSTED_ORIGINS`
+
+### Nginx 反向代理（SSE 关键配置）
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;          # 必须关闭，否则流式响应会被缓冲
+    proxy_read_timeout 600s;
+}
+```
+
+### systemd
+
+```ini
+[Unit]
+Description=CC Switch bridge
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/cc-switch
+EnvironmentFile=/opt/cc-switch/.env
+ExecStart=/opt/cc-switch/.venv/bin/uvicorn cc_switch.asgi:application --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose logs -f
+```
+
+数据库持久化在 `bridge-data` 卷中；升级时重新 `docker compose up -d --build` 即可，容器启动会自动执行迁移。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
@@ -114,6 +169,8 @@ curl http://127.0.0.1:8000/api/health
 | `DJANGO_SECRET_KEY` | 开发占位值 | 生产必须修改 |
 | `DJANGO_DEBUG` | `1` | 生产设为 `0` |
 | `DJANGO_ALLOWED_HOSTS` | 空 | 逗号分隔 |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | 空 | 部署 HTTPS 管理后台时填写 |
+| `DJANGO_DB_PATH` | `db.sqlite3` | SQLite 文件路径，容器内为 `/data/db.sqlite3` |
 | `BRIDGE_TOKEN` | 空 | **必填**，为空时拒绝所有代理请求 |
 | `BRIDGE_ENCRYPTION_KEY` | 空 | 凭据加密口令 |
 | `BRIDGE_RESERVE_RATIO` | `0.05` | 保留比例 |

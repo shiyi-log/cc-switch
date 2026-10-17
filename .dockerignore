@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+.uv-cache
+.uv-python
+db.sqlite3
+*.sqlite3
+data
+.env
+.env.*
+!.env.example
+.pytest_cache
+__pycache__
+*.pyc
+staticfiles

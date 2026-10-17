@@ -1,0 +1,15 @@
+services:
+  bridge:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_DB_PATH: /data/db.sqlite3
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - bridge-data:/data
+
+volumes:
+  bridge-data:

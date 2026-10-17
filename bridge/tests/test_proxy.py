@@ -188,3 +188,61 @@ async def test_proxy_streams_and_records_usage(bridge_settings):
     log = await RequestLog.objects.aget()
     assert log.input_tokens == 9
     assert log.output_tokens == 4
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_proxy_fails_over_after_upstream_429(bridge_settings):
+    first = await make_official("first", priority=1)
+    await make_official("second", priority=2)
+    route = respx.post("https://api.anthropic.com/v1/messages").mock(
+        side_effect=[
+            httpx.Response(
+                429,
+                json={
+                    "type": "error",
+                    "error": {"type": "rate_limit_error", "message": "quota"},
+                },
+                headers={
+                    "content-type": "application/json",
+                    "anthropic-ratelimit-unified-5h-utilization": "0.95",
+                },
+            ),
+            httpx.Response(
+                200,
+                json={"id": "msg_second", "type": "message", "model": "claude-sonnet-4-5"},
+                headers={"content-type": "application/json"},
+            ),
+        ]
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/messages",
+        data=json.dumps({"model": "claude-sonnet-4-5", "max_tokens": 8, "messages": []}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "msg_second"
+    assert route.call_count == 2
+    cooled = await Account.objects.aget(pk=first.pk)
+    assert cooled.cooldown_until is not None
+    window = await UsageWindow.objects.aget(account_id=first.pk, key=UsageWindow.FIVE_HOURS)
+    assert window.utilization == Decimal("0.950000")
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_status_reports_reserve_limit(bridge_settings):
+    await make_official()
+    client = AsyncClient()
+
+    unauthorized = await client.get("/api/status")
+    assert unauthorized.status_code == 401
+
+    response = await client.get("/api/status", headers={"x-bridge-token": "test-token"})
+    assert response.status_code == 200
+    account = response.json()["accounts"][0]
+    assert account["limit"] == pytest.approx(0.945)
+    assert account["available"] is True
