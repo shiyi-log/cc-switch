@@ -51,7 +51,7 @@ def mirror_request(
     if not db_path.exists():
         return False
 
-    now_ms = int(time.time() * 1000)
+    created_at = int(time.time())
     total_cost = str(cost_usd) if cost_usd is not None else "0"
     values = (
         f"bridge:{request_id}",
@@ -79,7 +79,7 @@ def mirror_request(
         "",
         1 if is_streaming else 0,
         "1.0",
-        now_ms,
+        created_at,
         "proxy",
     )
     try:
