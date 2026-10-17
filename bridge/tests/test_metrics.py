@@ -18,6 +18,12 @@ BRIDGE = {
     "STATS_MIN_SAMPLES": "3",
     "RESERVE_RATIO": "0.05",
     "SAFETY_MARGIN": "0.005",
+    "ROUTING_ALPHA": "0.6",
+    "SLOW_TTFT_MS": "5000",
+    "SLOW_MIN_TPS": "15",
+    "SLOW_PENALTY_SECONDS": "60",
+    "ROTATION_MARGIN": "0",
+    "EXPLORE_RATE": "0",
 }
 
 
@@ -95,3 +101,55 @@ def test_reserve_next_account_uses_dynamic_score():
     assert account is not None
     assert account.name == "fast"
     release_account(account.pk)
+
+
+@override_settings(BRIDGE=BRIDGE)
+@pytest.mark.django_db
+def test_recent_slow_account_is_skipped():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bridge.metrics import pick_account
+
+    fast_but_slow = relay(
+        "slow-now",
+        priority=1,
+        ewma_ttft_ms=200,
+        ewma_tps=100,
+        stats_samples=5,
+        last_slow_at=timezone.now(),
+    )
+    steady = relay("steady", priority=20, ewma_ttft_ms=1500, ewma_tps=30, stats_samples=5)
+    picked = pick_account([fast_but_slow, steady], "gpt-6.1-sol")
+    assert picked.name == "steady"
+
+
+@override_settings(BRIDGE=BRIDGE)
+@pytest.mark.django_db
+def test_rotation_prefers_least_recently_used():
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bridge.metrics import pick_account
+
+    now = timezone.now()
+    fresh = relay(
+        "fresh",
+        priority=10,
+        ewma_ttft_ms=500,
+        ewma_tps=50,
+        stats_samples=5,
+        last_used_at=now,
+    )
+    stale = relay(
+        "stale",
+        priority=11,
+        ewma_ttft_ms=500,
+        ewma_tps=50,
+        stats_samples=5,
+        last_used_at=now - timedelta(minutes=5),
+    )
+    picked = pick_account([fresh, stale], "gpt-6.1-sol")
+    assert picked.name == "stale"

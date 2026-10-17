@@ -194,11 +194,17 @@ def _candidates(
             if model not in (account.blocked_models or [])
         ]
     available = [account for account in accounts if account.is_available(now)]
-    from .metrics import rank_accounts
+    from .metrics import pick_account, rank_accounts
 
     official = [a for a in available if a.tier == Account.TIER_OFFICIAL]
     third_party = [a for a in available if a.tier == Account.TIER_THIRD_PARTY]
-    return rank_accounts(official, model) + rank_accounts(third_party, model)
+    official_order = rank_accounts(official, model)
+    third_order = rank_accounts(third_party, model)
+    if third_order:
+        chosen = pick_account(third_order, model)
+        if chosen is not None:
+            third_order = [chosen] + [a for a in third_order if a.pk != chosen.pk]
+    return official_order + third_order
 
 
 def available_accounts(
@@ -235,7 +241,9 @@ def reserve_next_account(
         if not candidates:
             return None
         account = candidates[0]
-        Account.objects.filter(pk=account.pk).update(inflight=F("inflight") + 1)
+        Account.objects.filter(pk=account.pk).update(
+            inflight=F("inflight") + 1, last_used_at=now
+        )
         account.inflight += 1
         return account
 
