@@ -410,3 +410,62 @@ async def test_model_not_available_blocks_account_and_fails_over(bridge_settings
     assert response.json()["id"] == "resp_second"
     blocked = await Account.objects.aget(pk=first.pk)
     assert "gpt-x" in blocked.blocked_models
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_parameter_400_fails_over_to_next_account(bridge_settings):
+    first = await Account.objects.acreate(
+        name="first",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://first.test",
+        priority=10,
+    )
+    first.set_credential("sk-first")
+    await first.asave()
+    second = await Account.objects.acreate(
+        name="second",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://second.test",
+        priority=20,
+    )
+    second.set_credential("sk-second")
+    await second.asave()
+
+    respx.post("https://first.test/v1/responses").mock(
+        return_value=httpx.Response(
+            400,
+            json={
+                "error": {
+                    "code": "invalid_request",
+                    "message": "The request could not be processed. Please check the request parameters.",
+                    "type": "invalid_request_error",
+                }
+            },
+            headers={"content-type": "application/json"},
+        )
+    )
+    respx.post("https://second.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "resp_second", "object": "response", "model": "gpt-6.1-sol"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "resp_second"

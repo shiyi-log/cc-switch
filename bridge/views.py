@@ -273,6 +273,9 @@ async def proxy(request, path: str):
     attempted: set = set()
     max_attempts = max(1, int(settings.BRIDGE.get("MAX_ATTEMPTS", 3)))
     last_error_message = ""
+    last_error_status = None
+    last_error_content = b""
+    last_error_type = "application/json"
 
     for _ in range(max_attempts):
         account = await sync_to_async(reserve_next_account)(
@@ -328,7 +331,20 @@ async def proxy(request, path: str):
             model_unavailable = status_code == 404 and "model" in message.lower()
             if model_unavailable and model:
                 await sync_to_async(_block_model)(account.pk, model)
-            retryable = status_code in RETRYABLE_STATUS or model_unavailable
+            lowered = message.lower()
+            parameter_error = status_code == 400 and (
+                "request parameters" in lowered
+                or "could not be processed" in lowered
+                or "invalid_request" in lowered
+            )
+            retryable = (
+                status_code in RETRYABLE_STATUS
+                or model_unavailable
+                or parameter_error
+            )
+            last_error_status = status_code
+            last_error_content = content
+            last_error_type = response.headers.get("content-type", "application/json")
             if retryable:
                 await sync_to_async(mark_failure)(account.pk, message, status_code)
             await sync_to_async(_log_request)(
@@ -351,6 +367,13 @@ async def proxy(request, path: str):
         finally:
             if not handed_off:
                 await sync_to_async(release_account)(account.pk)
+
+    if last_error_status in (400, 422) and last_error_content:
+        return HttpResponse(
+            last_error_content,
+            status=last_error_status,
+            content_type=last_error_type,
+        )
 
     account_query = Account.objects.filter(enabled=True)
     if protocols:
