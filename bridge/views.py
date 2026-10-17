@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
 import hmac
 import json
+import zlib
 import logging
 import time
 import uuid
@@ -17,6 +19,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Account, RequestLog
+from .official import refresh_official_quotas
 from .probe import probe_account, refresh_stale_probes
 from .quotas import (
     apply_header_usage,
@@ -54,6 +57,10 @@ def _error(status: int, error_type: str, message: str) -> JsonResponse:
 
 
 def _authorized(request) -> bool:
+    if settings.BRIDGE.get("ALLOW_LOCALHOST_UNAUTH") and request.META.get(
+        "REMOTE_ADDR"
+    ) in ("127.0.0.1", "::1"):
+        return True
     token = settings.BRIDGE.get("TOKEN") or ""
     if not token:
         return False
@@ -65,17 +72,36 @@ def _authorized(request) -> bool:
     return any(value and hmac.compare_digest(value, token) for value in provided)
 
 
+def _decode_body(body: bytes, encoding: str) -> bytes:
+    """Decompress a request body before parsing/forwarding it upstream."""
+    encoding = (encoding or "").strip().lower()
+    if not encoding or encoding == "identity":
+        return body
+    if encoding in ("gzip", "x-gzip"):
+        return gzip.decompress(body)
+    if encoding == "deflate":
+        return zlib.decompress(body)
+    if encoding == "zstd":
+        import zstandard
+
+        return zstandard.ZstdDecompressor().decompress(
+            body, max_output_size=64 * 1024 * 1024
+        )
+    raise ValueError(f"unsupported content-encoding: {encoding}")
+
+
 async def _read_body(request) -> bytes:
     # ASGIHandler buffers the request body before invoking the view, so the
     # synchronous ``body`` property is safe (and replayable) here.
-    return request.body
+    return _decode_body(request.body, request.headers.get("content-encoding", ""))
 
 
-def _protocol_for_path(path: str) -> str | None:
+def _protocols_for_path(path: str) -> list[str] | None:
     if path == "messages" or path.startswith("messages/"):
-        return Account.PROTOCOL_ANTHROPIC
+        return [Account.PROTOCOL_ANTHROPIC]
     if path.startswith("responses") or path.startswith("chat/completions"):
-        return Account.PROTOCOL_OPENAI
+        # Official ChatGPT account first, third-party OpenAI-compatible fallback.
+        return [Account.PROTOCOL_CODEX, Account.PROTOCOL_OPENAI]
     return None
 
 
@@ -171,12 +197,13 @@ async def proxy(request, path: str):
         return _error(400, "invalid_request_error", "Request body must be a JSON object")
 
     model = str(payload.get("model") or "")
-    protocol = _protocol_for_path(path)
+    protocols = _protocols_for_path(path)
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     started = time.monotonic()
     path_only = f"/v1/{path}"
 
-    # Third-party providers are probed before routing so their balance is fresh.
+    # Keep both quota sources fresh before routing.
+    await refresh_official_quotas()
     await refresh_stale_probes()
 
     attempted: set = set()
@@ -184,7 +211,7 @@ async def proxy(request, path: str):
     last_error_message = ""
 
     for _ in range(max_attempts):
-        account = await sync_to_async(reserve_next_account)(attempted, protocol=protocol)
+        account = await sync_to_async(reserve_next_account)(attempted, protocols=protocols)
         if account is None:
             break
         attempted.add(account.pk)
@@ -250,15 +277,15 @@ async def proxy(request, path: str):
                 await sync_to_async(release_account)(account.pk)
 
     account_query = Account.objects.filter(enabled=True)
-    if protocol:
-        account_query = account_query.filter(protocol=protocol)
+    if protocols:
+        account_query = account_query.filter(protocol__in=protocols)
     total = await sync_to_async(account_query.count)()
     if total == 0:
         return _error(
             503,
             "overloaded_error",
-            "No enabled upstream account is configured for protocol "
-            f"{protocol or 'any'}",
+            "No enabled upstream account is configured for protocols "
+            f"{protocols or 'any'}",
         )
     return _error(
         429,

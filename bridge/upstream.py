@@ -9,6 +9,7 @@ from decimal import Decimal
 from django.conf import settings
 
 from .models import Account, ModelPrice
+from .official import load_tokens
 
 logger = logging.getLogger("bridge")
 
@@ -19,6 +20,9 @@ def upstream_url(account: Account, path: str) -> str:
     base = account.base_url.rstrip("/")
     if not path.startswith("/"):
         path = "/" + path
+    if account.protocol == Account.PROTOCOL_CODEX and path.startswith("/v1/"):
+        # Codex official base is .../backend-api/codex and expects /responses.
+        path = path[3:]
     return base + path
 
 
@@ -36,6 +40,28 @@ OPENAI_FORWARD_HEADERS = (
 
 def build_upstream_headers(account: Account, incoming) -> dict[str, str]:
     """Copy the client headers that matter and swap in the account credentials."""
+    if account.protocol == Account.PROTOCOL_CODEX:
+        headers: dict[str, str] = {}
+        for key in (
+            "content-type",
+            "accept",
+            "user-agent",
+            "openai-beta",
+            "originator",
+            "session_id",
+            "conversation_id",
+        ):
+            value = incoming.get(key)
+            if value:
+                headers[key] = value
+        token, account_id = load_tokens()
+        headers["authorization"] = f"Bearer {token}"
+        if account_id:
+            headers["chatgpt-account-id"] = account_id
+        for key, value in (account.extra_headers or {}).items():
+            headers[str(key)] = str(value)
+        return headers
+
     if account.protocol == Account.PROTOCOL_OPENAI:
         headers: dict[str, str] = {}
         for key in OPENAI_FORWARD_HEADERS:

@@ -40,9 +40,11 @@ class Account(models.Model):
 
     PROTOCOL_ANTHROPIC = "anthropic"
     PROTOCOL_OPENAI = "openai"
+    PROTOCOL_CODEX = "codex"
     PROTOCOL_CHOICES = [
         (PROTOCOL_ANTHROPIC, "Anthropic /v1/messages"),
         (PROTOCOL_OPENAI, "OpenAI /v1/responses"),
+        (PROTOCOL_CODEX, "ChatGPT Codex 官方"),
     ]
 
     AUTH_OAUTH = "oauth"
@@ -55,11 +57,13 @@ class Account(models.Model):
     QUOTA_HEADERS = "headers"
     QUOTA_BUDGET = "budget"
     QUOTA_PROBE = "probe"
+    QUOTA_OFFICIAL = "official"
     QUOTA_NONE = "none"
     QUOTA_CHOICES = [
         (QUOTA_HEADERS, "上游响应头 (订阅额度)"),
         (QUOTA_BUDGET, "本地预算 (按量计费)"),
         (QUOTA_PROBE, "HTTP 查询 (第三方余额)"),
+        (QUOTA_OFFICIAL, "官方 ChatGPT 用量 (wham/usage)"),
         (QUOTA_NONE, "不限制"),
     ]
 
@@ -148,6 +152,12 @@ class Account(models.Model):
             return [w for w in windows if w.key == UsageWindow.BUDGET]
         if self.quota_mode == self.QUOTA_PROBE:
             return [w for w in windows if w.key == UsageWindow.PROBE]
+        if self.quota_mode == self.QUOTA_OFFICIAL:
+            return [
+                w
+                for w in windows
+                if w.key in (UsageWindow.OFFICIAL_5H, UsageWindow.OFFICIAL_7D)
+            ]
         return []
 
     def utilization(self) -> Decimal:
@@ -176,6 +186,14 @@ class Account(models.Model):
             has_probe = any(w.key == UsageWindow.PROBE for w in self.windows.all())
             if settings.BRIDGE.get("PROBE_REQUIRED", True) and not has_probe:
                 return False
+        if self.quota_mode == self.QUOTA_OFFICIAL:
+            # Fail closed: never spend official quota before we know its usage.
+            has_official = any(
+                w.key in (UsageWindow.OFFICIAL_5H, UsageWindow.OFFICIAL_7D)
+                for w in self.windows.all()
+            )
+            if not has_official:
+                return False
         return not self.at_reserve()
 
 
@@ -184,11 +202,15 @@ class UsageWindow(models.Model):
     SEVEN_DAYS = "7d"
     BUDGET = "budget"
     PROBE = "probe"
+    OFFICIAL_5H = "official_5h"
+    OFFICIAL_7D = "official_7d"
     KEY_CHOICES = [
         (FIVE_HOURS, "5 小时窗口"),
         (SEVEN_DAYS, "每周窗口"),
         (BUDGET, "预算周期"),
         (PROBE, "第三方余额"),
+        (OFFICIAL_5H, "官方 5 小时窗口"),
+        (OFFICIAL_7D, "官方每周窗口"),
     ]
 
     account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="windows")

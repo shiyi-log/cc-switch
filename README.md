@@ -31,6 +31,7 @@ uv run uvicorn cc_switch.asgi:application --host 127.0.0.1 --port 8000
 | --- | --- | --- | --- | --- |
 | Claude Code 订阅 | `official` | `oauth` | `headers` | 填 access token，额度取自响应头 |
 | Anthropic API Key | `official` | `api_key` | `budget` | 填预算 `budget_usd`，按 token 成本累计 |
+| 官方 ChatGPT (Codex) | `official` | `oauth` | `official` | 从 `~/.codex/auth.json` 读 token，按 `wham/usage` 判定 95% |
 | 第三方供应商 | `third_party` | `api_key` | `probe` | 填 `base_url` 与余额查询配置 |
 
 凭据在保存时用 Fernet 加密（密钥来自 `BRIDGE_ENCRYPTION_KEY`，未配置时回退到 `DJANGO_SECRET_KEY`）。
@@ -86,7 +87,17 @@ limit = 1 - reserve_ratio - safety_margin   # 默认 1 - 0.05 - 0.005 = 94.5%
 - `inflight` 达到 `max_inflight` 的账号暂时不再接新请求，减少并发越线
 - `probe` 模式必须先成功查到一次余额（`BRIDGE_PROBE_REQUIRED=1`），否则不会路由，避免“额度未知却继续花”
 
-> 该策略按上游响应头判定并预留 0.5% 安全余量；极端并发下仍可能因响应滞后出现轻微越线。
+### 官方 ChatGPT 账号（Codex）
+
+`protocol=codex` 的账号会代理到官方 `https://chatgpt.com/backend-api/codex`，额度取自
+`https://chatgpt.com/backend-api/wham/usage` 的 `primary_window / secondary_window.used_percent`：
+
+- 任一窗口 ≥ 94.5% 即跳过该账号，自动切到第三方供应商
+- 未取得额度数据前默认**不可用**（fail-closed），避免误耗官方额度
+- token 直接从 `~/.codex/auth.json` 读取，不复制进桥数据库；登录刷新后自动生效
+- 建议把官方账号设为 `tier=official, priority=1`，第三方设为 `tier=third_party`
+
+> 该策略按上游响应头/官方用量接口判定并预留 0.5% 安全余量；极端并发下仍可能因响应滞后出现轻微越线。
 
 ## 客户端接入
 
@@ -177,6 +188,9 @@ docker compose logs -f
 | `BRIDGE_SAFETY_MARGIN` | `0.005` | 安全余量 |
 | `BRIDGE_PROBE_TTL_SECONDS` | `300` | 余额查询缓存 |
 | `BRIDGE_PROBE_REQUIRED` | `1` | 无余额数据时禁止路由 |
+| `BRIDGE_CODEX_AUTH_PATH` | `~/.codex/auth.json` | 官方 ChatGPT 登录文件 |
+| `BRIDGE_OFFICIAL_QUOTA_URL` | `https://chatgpt.com/backend-api/wham/usage` | 官方额度接口 |
+| `BRIDGE_OFFICIAL_QUOTA_TTL_SECONDS` | `60` | 官方额度缓存时间 |
 | `BRIDGE_MAX_ATTEMPTS` | `3` | 单请求最多尝试账号数 |
 | `BRIDGE_TIMEOUT_SECONDS` | `600` | 上游超时 |
 

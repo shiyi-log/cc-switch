@@ -180,10 +180,10 @@ def record_probe_usage(
 # Selection
 # ---------------------------------------------------------------------------
 def _candidates(
-    accounts: list[Account], now: datetime, protocol: str | None = None
+    accounts: list[Account], now: datetime, protocols: list[str] | None = None
 ) -> list[Account]:
-    if protocol:
-        accounts = [account for account in accounts if account.protocol == protocol]
+    if protocols:
+        accounts = [account for account in accounts if account.protocol in protocols]
     available = [account for account in accounts if account.is_available(now)]
     official = sorted(
         (a for a in available if a.tier == Account.TIER_OFFICIAL),
@@ -197,17 +197,17 @@ def _candidates(
 
 
 def available_accounts(
-    now: datetime | None = None, protocol: str | None = None
+    now: datetime | None = None, protocols: list[str] | None = None
 ) -> list[Account]:
     now = now or timezone.now()
     accounts = list(
         Account.objects.filter(enabled=True).prefetch_related("windows").order_by("priority", "name")
     )
-    return _candidates(accounts, now, protocol)
+    return _candidates(accounts, now, protocols)
 
 
 def reserve_next_account(
-    exclude_ids=(), now: datetime | None = None, protocol: str | None = None
+    exclude_ids=(), now: datetime | None = None, protocols: list[str] | None = None
 ) -> Account | None:
     """Atomically pick the best account and bump its in-flight counter."""
     now = now or timezone.now()
@@ -218,7 +218,7 @@ def reserve_next_account(
             queryset = queryset.select_for_update()
         accounts = list(queryset.prefetch_related("windows").order_by("priority", "name"))
         candidates = [
-            a for a in _candidates(accounts, now, protocol) if a.pk not in excluded
+            a for a in _candidates(accounts, now, protocols) if a.pk not in excluded
         ]
         if not candidates:
             return None

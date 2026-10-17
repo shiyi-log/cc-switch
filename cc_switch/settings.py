@@ -102,6 +102,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': os.environ.get('DJANGO_DB_PATH', BASE_DIR / 'db.sqlite3'),
+        'OPTIONS': {'timeout': 20},
     }
 }
 
@@ -181,7 +182,20 @@ BRIDGE = {
     # Refuse to route to a probe-based provider until its balance was read at
     # least once, otherwise the 5% reserve could not be enforced.
     'PROBE_REQUIRED': os.environ.get('BRIDGE_PROBE_REQUIRED', '1') == '1',
+    # Allow local Codex (official provider, no bridge header) to use the bridge.
+    'ALLOW_LOCALHOST_UNAUTH': os.environ.get('BRIDGE_ALLOW_LOCALHOST', '0') == '1',
     'PROBE_TIMEOUT_SECONDS': float(os.environ.get('BRIDGE_PROBE_TIMEOUT_SECONDS', '8')),
+    # Official ChatGPT (Codex) quota source: the same endpoint the Codex UI uses.
+    'CODEX_AUTH_PATH': os.environ.get(
+        'BRIDGE_CODEX_AUTH_PATH', str(Path.home() / '.codex' / 'auth.json')
+    ),
+    'OFFICIAL_QUOTA_URL': os.environ.get(
+        'BRIDGE_OFFICIAL_QUOTA_URL',
+        'https://chatgpt.com/backend-api/wham/usage',
+    ),
+    'OFFICIAL_QUOTA_TTL_SECONDS': int(
+        os.environ.get('BRIDGE_OFFICIAL_QUOTA_TTL_SECONDS', '60')
+    ),
 }
 
 LOGGING = {

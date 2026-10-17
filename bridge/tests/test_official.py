@@ -1,0 +1,144 @@
+import json
+from decimal import Decimal
+
+import httpx
+import pytest
+import respx
+from django.test import AsyncClient
+from django.utils import timezone
+
+from bridge.models import Account, UsageWindow
+
+BASE_BRIDGE = {
+    "TOKEN": "test-token",
+    "MAX_ATTEMPTS": 3,
+    "TIMEOUT_SECONDS": 30,
+    "RESERVE_RATIO": "0.05",
+    "SAFETY_MARGIN": "0.005",
+    "PROBE_TTL_SECONDS": 300,
+    "PROBE_REQUIRED": True,
+    "PROBE_TIMEOUT_SECONDS": 5,
+    "OFFICIAL_QUOTA_TTL_SECONDS": 60,
+}
+
+
+def write_auth(path, token="official-token", account_id="acct-1"):
+    path.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {
+                    "access_token": token,
+                    "account_id": account_id,
+                    "refresh_token": "r",
+                },
+            }
+        )
+    )
+    return path
+
+
+@pytest.fixture
+def official_settings(settings, tmp_path):
+    path = write_auth(tmp_path / "auth.json")
+    settings.BRIDGE = {**BASE_BRIDGE, "CODEX_AUTH_PATH": str(path)}
+    return settings
+
+
+async def make_official(utilization=None):
+    account = await Account.objects.acreate(
+        name="official",
+        tier=Account.TIER_OFFICIAL,
+        protocol=Account.PROTOCOL_CODEX,
+        auth_type=Account.AUTH_OAUTH,
+        quota_mode=Account.QUOTA_OFFICIAL,
+        base_url="https://chatgpt.com/backend-api/codex",
+        priority=1,
+        last_probe_at=timezone.now(),
+    )
+    if utilization is not None:
+        await UsageWindow.objects.acreate(
+            account=account,
+            key=UsageWindow.OFFICIAL_5H,
+            utilization=Decimal(utilization),
+        )
+    return account
+
+
+async def make_relay():
+    account = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_PROBE,
+        base_url="https://relay.test",
+        budget_usd=Decimal("100"),
+    )
+    account.set_credential("sk-relay")
+    await account.asave()
+    await UsageWindow.objects.acreate(
+        account=account, key=UsageWindow.PROBE, utilization=Decimal("0.10")
+    )
+    return account
+
+
+@pytest.mark.django_db(transaction=True)
+async def test_official_without_quota_is_not_used(official_settings):
+    await make_official()
+    official = await Account.objects.prefetch_related("windows").aget(name="official")
+    assert official.is_available() is False
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_official_is_preferred_below_reserve(official_settings):
+    await make_official("0.50")
+    await make_relay()
+    route = respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "resp_official", "object": "response", "model": "gpt-6.1-sol"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "resp_official"
+    request = route.calls[0].request
+    assert request.headers["authorization"] == "Bearer official-token"
+    assert request.headers["chatgpt-account-id"] == "acct-1"
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_official_at_99_percent_falls_back_to_relay(official_settings):
+    await make_official("0.99")
+    await make_relay()
+    route = respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "resp_relay", "object": "response", "model": "gpt-6.1-sol"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "resp_relay"
+    assert route.calls[0].request.headers["authorization"] == "Bearer sk-relay"
