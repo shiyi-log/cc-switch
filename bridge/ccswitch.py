@@ -103,3 +103,82 @@ def mirror_request(
     except Exception as exc:  # noqa: BLE001
         logger.warning("failed to mirror log to CC Switch: %s", exc)
         return False
+
+
+def reattribute_request(
+    *,
+    account: Account,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    status_code: int | None,
+    created_at: int,
+    request_id: str,
+    path: str,
+    cost_usd=None,
+    duration_ms: int | None = None,
+    ttft_ms: int | None = None,
+    error_message: str = "",
+) -> bool:
+    """Rewrite CC Switch's native bridge row to the real vendor provider id."""
+    if not settings.BRIDGE.get("CC_SWITCH_MIRROR"):
+        return False
+    vendor_id = (account.cc_provider_id or "").strip()
+    bridge_id = (settings.BRIDGE.get("CC_SWITCH_BRIDGE_PROVIDER_ID") or "").strip()
+    if not vendor_id or not bridge_id:
+        return False
+
+    db_path = Path(
+        settings.BRIDGE.get("CC_SWITCH_DB_PATH")
+        or (Path.home() / ".cc-switch" / "cc-switch.db")
+    ).expanduser()
+    if not db_path.exists():
+        return False
+
+    for _ in range(8):
+        try:
+            con = sqlite3.connect(db_path, timeout=2)
+            con.execute("PRAGMA busy_timeout=2000")
+            row = con.execute(
+                """SELECT request_id FROM proxy_request_logs
+                   WHERE provider_id=? AND data_source='proxy' AND model=?
+                     AND status_code IS ?
+                     AND ABS(created_at - ?) <= 12
+                     AND input_tokens=? AND output_tokens=?
+                   ORDER BY ABS(created_at - ?) LIMIT 1""",
+                (
+                    bridge_id,
+                    model or "",
+                    status_code,
+                    created_at,
+                    int(input_tokens or 0),
+                    int(output_tokens or 0),
+                    created_at,
+                ),
+            ).fetchone()
+            if row:
+                con.execute(
+                    "UPDATE proxy_request_logs SET provider_id=? WHERE request_id=?",
+                    (vendor_id, row[0]),
+                )
+                con.commit()
+                con.close()
+                return True
+            con.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("reattribute failed: %s", exc)
+        time.sleep(0.5)
+
+    return mirror_request(
+        account=account,
+        request_id=request_id,
+        path=path,
+        model=model,
+        status_code=status_code,
+        error_message=error_message,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        ttft_ms=ttft_ms,
+    )

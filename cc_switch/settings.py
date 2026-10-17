@@ -211,6 +211,11 @@ BRIDGE = {
         'BRIDGE_CC_SWITCH_DB_PATH',
         str(Path.home() / '.cc-switch' / 'cc-switch.db'),
     ),
+    # CC Switch's provider id for the bridge itself; native rows are rewritten
+    # to the real vendor provider id.
+    'CC_SWITCH_BRIDGE_PROVIDER_ID': os.environ.get(
+        'BRIDGE_CC_SWITCH_BRIDGE_PROVIDER_ID', ''
+    ),
 }
 
 LOGGING = {

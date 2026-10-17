@@ -184,6 +184,9 @@ async def test_proxy_streams_and_records_usage(bridge_settings):
     assert response.status_code == 200
     chunks = [chunk async for chunk in response.streaming_content]
     assert b"".join(chunks) == sse
+    import asyncio
+
+    await asyncio.sleep(0.2)
 
     log = await RequestLog.objects.aget()
     assert log.input_tokens == 9

@@ -130,11 +130,13 @@ curl http://127.0.0.1:8000/api/health
 
 ### 镜像到 CC Switch
 
-设置 `BRIDGE_CC_SWITCH_MIRROR=1`（默认开启）后，桥会把每次调用按账号的 `cc_provider_id` 写入 CC Switch 的 `proxy_request_logs`，这样在 CC Switch 界面里能直接按真实供应商（pp.dog / wdlink 等）看到调用、token 和状态。
+设置 `BRIDGE_CC_SWITCH_MIRROR=1`（默认开启）后，桥会把 CC Switch 原生代理日志中那条“桥”的记录，改写成真实供应商的 `provider_id`：
 
-- `cc_provider_id` 在账号编辑页填写，对应 CC Switch 里的 `providers.id`
-- 写入是 best-effort，CC Switch 数据库不可用时不会影响代理
-- CC Switch 自身代理日志仍可能同时存在（`provider_id` 为桥），造成重复；可在 `proxy_config.enable_logging` 里关闭
+- 保留 CC Switch 自己采集的 token、成本、速度、首字时间
+- 按模型、token 数、时间窗口匹配原生记录，匹配失败时退化为写入一条桥侧日志
+- `cc_provider_id` 在账号编辑页填写，对应 CC Switch 的 `providers.id`
+- 需要把 CC Switch 里桥的 provider id 配到 `BRIDGE_CC_SWITCH_BRIDGE_PROVIDER_ID`
+- 写入/改写是 best-effort，CC Switch 数据库不可用时不影响代理
 渠道标签在账号编辑页填写；注意它只用于桥侧日志区分，中转站内部的渠道对客户端不可见。
 
 返回每个账号的 tier、额度模式、各窗口利用率、剩余比例、保留线、冷却状态与最近错误。

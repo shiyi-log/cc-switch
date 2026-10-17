@@ -33,3 +33,7 @@ media/
 
 # Local runtime artifacts
 .run/
+
+# SQLite WAL/SHM
+db.sqlite3-wal
+db.sqlite3-shm
