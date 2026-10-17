@@ -331,17 +331,9 @@ async def proxy(request, path: str):
             model_unavailable = status_code == 404 and "model" in message.lower()
             if model_unavailable and model:
                 await sync_to_async(_block_model)(account.pk, model)
-            lowered = message.lower()
-            parameter_error = status_code == 400 and (
-                "request parameters" in lowered
-                or "could not be processed" in lowered
-                or "invalid_request" in lowered
-            )
-            retryable = (
-                status_code in RETRYABLE_STATUS
-                or model_unavailable
-                or parameter_error
-            )
+            # Any upstream error is channel-specific as far as we are concerned:
+            # try the next account instead of surfacing it immediately.
+            retryable = status_code >= 400
             last_error_status = status_code
             last_error_content = content
             last_error_type = response.headers.get("content-type", "application/json")
@@ -368,7 +360,7 @@ async def proxy(request, path: str):
             if not handed_off:
                 await sync_to_async(release_account)(account.pk)
 
-    if last_error_status in (400, 422) and last_error_content:
+    if last_error_status is not None and last_error_content:
         return HttpResponse(
             last_error_content,
             status=last_error_status,
