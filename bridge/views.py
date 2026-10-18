@@ -268,6 +268,7 @@ async def proxy(request, path: str):
         return _error(400, "invalid_request_error", "Request body must be a JSON object")
 
     model = str(payload.get("model") or "")
+    wants_stream = bool(payload.get("stream"))
     protocols = _protocols_for_path(path)
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     started = time.monotonic()
@@ -339,7 +340,15 @@ async def proxy(request, path: str):
 
             if response.status_code < 400:
                 result = await _success(
-                    account, client, response, request, path_only, request_id, model, started
+                    account,
+                    client,
+                    response,
+                    request,
+                    path_only,
+                    request_id,
+                    model,
+                    started,
+                    wants_stream,
                 )
                 # Streaming responses release the account in their generator.
                 handed_off = isinstance(result, StreamingHttpResponse)
@@ -439,11 +448,16 @@ async def _finalize_stream(
         await sync_to_async(release_account)(account.pk)
 
 
-async def _success(account, client, response, request, path, request_id, model, started):
+async def _success(
+    account, client, response, request, path, request_id, model, started, wants_stream=False
+):
     content_type = response.headers.get("content-type", "application/json")
     headers = _copy_headers(response)
 
-    if "text/event-stream" in content_type:
+    # Official Codex returns SSE with an application/json content-type.
+    is_stream = wants_stream or "text/event-stream" in content_type
+    if is_stream:
+        content_type = "text/event-stream"
         parser = SSEUsageParser()
 
         async def stream_body():

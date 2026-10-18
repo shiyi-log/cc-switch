@@ -143,3 +143,43 @@ async def test_official_at_99_percent_falls_back_to_relay(official_settings):
     assert response.status_code == 200
     assert response.json()["id"] == "resp_relay"
     assert route.calls[0].request.headers["authorization"] == "Bearer sk-relay"
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_official_sse_with_json_content_type_records_usage(official_settings):
+    import asyncio
+
+    from bridge.models import RequestLog
+
+    await make_official("0.10")
+    sse = (
+        b'event: response.created\ndata: {"type":"response.created",'
+        b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+        b'event: response.completed\ndata: {"type":"response.completed",'
+        b'"response":{"model":"gpt-6.1-sol","usage":'
+        b'{"input_tokens":7,"output_tokens":11}}}\n\n'
+    )
+    respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
+        return_value=httpx.Response(
+            200, content=sse, headers={"content-type": "application/json"}
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps(
+            {"model": "gpt-6.1-sol", "input": [{"role": "user", "content": []}], "stream": True}
+        ),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200
+    _ = [chunk async for chunk in response.streaming_content]
+    await asyncio.sleep(0.2)
+
+    log = await RequestLog.objects.filter(path__endswith="/responses").order_by("-created_at").afirst()
+    assert log is not None
+    assert log.input_tokens == 7
+    assert log.output_tokens == 11
