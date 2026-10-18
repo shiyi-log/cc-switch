@@ -28,6 +28,7 @@ from .models import Account
 from .quotas import record_probe_usage, stale_probe_ids
 
 logger = logging.getLogger("bridge")
+_probe_lock = asyncio.Lock()
 
 
 def _render(template: str, account: Account) -> str:
@@ -157,6 +158,11 @@ async def probe_account(account_id, force: bool = False) -> bool:
 
 
 async def refresh_stale_probes(force: bool = False) -> int:
+    async with _probe_lock:
+        return await _refresh_stale_probes_locked(force)
+
+
+async def _refresh_stale_probes_locked(force: bool = False) -> int:
     if force:
         ids = await sync_to_async(
             lambda: list(

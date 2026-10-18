@@ -123,7 +123,7 @@ class Account(models.Model):
         "价格系数", max_digits=6, decimal_places=4, default=Decimal("1.0"),
         help_text="按量计费的实际单价系数，用于动态路由比价。",
     )
-    max_inflight = models.PositiveIntegerField("最大并发", default=4)
+    max_inflight = models.PositiveIntegerField("最大并发", default=32)
     inflight = models.PositiveIntegerField("当前并发", default=0)
     cooldown_until = models.DateTimeField("冷却截止", null=True, blank=True)
     last_error = models.TextField("最近错误", blank=True, default="")

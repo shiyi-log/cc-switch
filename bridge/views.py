@@ -282,6 +282,7 @@ async def proxy(request, path: str):
     round_delay = float(settings.BRIDGE.get("RETRY_ROUND_DELAY", 0.5))
     attempts = 0
     round_no = 0
+    forced_ignore_cooldown = False
     round_excluded: set = set()
     last_error_message = ""
     last_error_status = None
@@ -296,6 +297,12 @@ async def proxy(request, path: str):
             ignore_cooldown=round_no > 0,
         )
         if account is None:
+            if attempts == 0 and not forced_ignore_cooldown:
+                # Everyone may be in a short pool cooldown; try one bypass
+                # pass before declaring the whole pool unavailable.
+                forced_ignore_cooldown = True
+                round_no += 1
+                continue
             if attempts == 0:
                 break
             # All accounts in this round failed; start another round until the
@@ -417,6 +424,20 @@ async def proxy(request, path: str):
             "No enabled upstream account is configured for protocols "
             f"{protocols or 'any'}",
         )
+    now = timezone.now()
+    cooling = await sync_to_async(
+        lambda: Account.objects.filter(
+            enabled=True, cooldown_until__gt=now
+        ).count()
+    )()
+    if total and cooling == total:
+        response = _error(
+            429,
+            "rate_limit_error",
+            "All upstream channels are cooling down; retry shortly",
+        )
+        response["Retry-After"] = "3"
+        return response
     return _error(
         429,
         "rate_limit_error",
