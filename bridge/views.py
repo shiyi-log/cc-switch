@@ -32,7 +32,13 @@ from .quotas import (
     release_account,
     reserve_next_account,
 )
-from .upstream import SSEUsageParser, build_upstream_headers, calculate_cost, upstream_url
+from .upstream import (
+    SSEUsageParser,
+    build_upstream_headers,
+    calculate_cost,
+    prepare_codex_body,
+    upstream_url,
+)
 
 logger = logging.getLogger("bridge")
 
@@ -307,8 +313,11 @@ async def proxy(request, path: str):
         round_excluded.add(account.pk)
         handed_off = False
         try:
+            forward_body = body
+            if account.protocol == Account.PROTOCOL_CODEX:
+                forward_body = prepare_codex_body(body)
             try:
-                client, response = await _send(account, request, body, path_only)
+                client, response = await _send(account, request, forward_body, path_only)
             except Exception as exc:  # noqa: BLE001 - network failures are retried
                 logger.warning("upstream request failed for %s: %s", account.name, exc)
                 last_error_message = str(exc)

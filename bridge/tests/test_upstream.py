@@ -132,3 +132,21 @@ def test_sse_parser_extracts_openai_responses_usage():
         "output_tokens": 20,
         "cache_read_input_tokens": 40,
     }
+
+
+def test_prepare_codex_body_strips_history_ids():
+    from bridge.upstream import prepare_codex_body
+
+    body = json.dumps(
+        {
+            "model": "gpt-6.1-sol",
+            "previous_response_id": "resp_from_relay",
+            "input": [
+                {"id": "item_123", "role": "user", "content": []},
+                {"id": "msg_456", "role": "assistant", "content": []},
+            ],
+        }
+    ).encode()
+    prepared = json.loads(prepare_codex_body(body))
+    assert "previous_response_id" not in prepared
+    assert all("id" not in item for item in prepared["input"])

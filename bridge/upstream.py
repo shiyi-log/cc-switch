@@ -39,6 +39,23 @@ OPENAI_FORWARD_HEADERS = (
 )
 
 
+def prepare_codex_body(body: bytes) -> bytes:
+    """Official ChatGPT rejects third-party item IDs in conversation history."""
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+    payload.pop("previous_response_id", None)
+    items = payload.get("input")
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                item.pop("id", None)
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
 def build_upstream_headers(account: Account, incoming) -> dict[str, str]:
     """Copy the client headers that matter and swap in the account credentials."""
     if account.protocol == Account.PROTOCOL_CODEX:
