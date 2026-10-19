@@ -179,6 +179,22 @@ curl http://127.0.0.1:8000/api/health
 
 > 看门狗只能托管**由它启动**的会话；已经在跑的交互式会话无法中途接管。
 
+## 保持 Codex 账号显示
+
+CC Switch 每次代理接管都会把 `~/.codex/config.toml` 改写成自定义 provider，Codex 左下角就会显示 “CC Switch Bridge” 而不是 ChatGPT 账号。
+
+`scripts/keep_codex_official.py` 每 10 秒检查一次配置，发现被改写就恢复为：
+
+```toml
+openai_base_url = "http://127.0.0.1:15721/v1"
+```
+
+同时保留 `model_provider` 为默认的 `openai`，这样 Codex 仍显示官方账号，请求继续经过 CC Switch 代理与桥。若 `auth.json` 丢失，会从最近的备份恢复。
+
+```bash
+nohup .venv/bin/python scripts/keep_codex_official.py >> .run/codex-config-watchdog.out 2>&1 &
+```
+
 ## 生产部署
 
 ### 直接运行
