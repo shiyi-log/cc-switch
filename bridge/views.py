@@ -576,6 +576,8 @@ async def status(request):
                     "utilization": float(account.utilization()),
                     "remaining": float(account.remaining_ratio()),
                     "limit": float(account.quota_limit()),
+                    "soft_limit": float(account.soft_quota_limit()),
+                    "soft_reserve": account.at_soft_reserve(),
                     "reserve_ratio": float(account.reserve_ratio),
                     "inflight": account.inflight,
                     "cooldown_until": account.cooldown_until.isoformat() if account.cooldown_until else None,

@@ -226,6 +226,9 @@ def _candidates(
     fallback_healthy = [a for a in fallback if not recently_slow(a)]
     fallback_slow = [a for a in fallback if recently_slow(a)]
 
+    official_active = [a for a in official if not a.at_soft_reserve()]
+    official_fallback = [a for a in official if a.at_soft_reserve()]
+
     def order(group):
         if not group:
             return []
@@ -238,11 +241,12 @@ def _candidates(
     # Preferred channels first, but a slow preferred channel must not block a
     # healthy fallback channel.
     return (
-        rank_accounts(official, model)
+        order(official_active)
         + order(preferred_healthy)
         + order(fallback_healthy)
         + order(preferred_slow)
         + order(fallback_slow)
+        + order(official_fallback)
     )
 
 

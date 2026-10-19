@@ -82,14 +82,15 @@ curl -H "x-bridge-token: $BRIDGE_TOKEN" \
 
 | tier | `reserve_ratio` | `safety_margin` | 行为 |
 | --- | --- | --- | --- |
-| `official` | `0.05` | `0.005` | 用到 94.5% 即停，保留最后 5% |
+| `official` | `0.02`（硬） / `0.05`（软） | `0` | 95% 起不再主动调用，仅最后兜底；98% 起彻底禁用 |
 | `third_party` | `0` | `0` | 不预留，余额耗尽（利用率 100%）才跳过 |
 
 ```
 limit = 1 - reserve_ratio - safety_margin
 ```
 
-- 任一窗口（5h / 7d / 预算 / 余额）利用率 ≥ `limit`，账号即被跳过
+- 官方账号有两道线：`soft_reserve_ratio=0.05` 时用到 95% 后不再主动选中，但第三方全部不可用时仍会兜底；`reserve_ratio=0.02` 时用到 98% 后彻底禁用
+- 任一窗口（5h / 7d / 预算 / 余额）利用率 ≥ 硬 `limit`，账号即被跳过
 - 第三方可设 `preferred=1` 组成优先池：健康时优先调用，且优先池内部仍按速度/价格动态排序；优先池变慢或被冷却时自动落到普通渠道
 - 官方账号全部到线 → 使用第三方供应商；第三方余额也耗尽 → `429 rate_limit_error`
 - `inflight` 达到 `max_inflight` 的账号暂时不再接新请求，减少并发越线

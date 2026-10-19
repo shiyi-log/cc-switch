@@ -4,7 +4,7 @@ from decimal import Decimal
 import httpx
 import pytest
 import respx
-from django.test import AsyncClient
+from django.test import AsyncClient, override_settings
 from django.utils import timezone
 
 from bridge.models import Account, UsageWindow
@@ -183,3 +183,85 @@ async def test_official_sse_with_json_content_type_records_usage(official_settin
     assert log is not None
     assert log.input_tokens == 7
     assert log.output_tokens == 11
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(BRIDGE={**BASE_BRIDGE})
+async def test_soft_reserve_is_last_resort_not_hard_block(official_settings):
+    from asgiref.sync import sync_to_async
+
+    from bridge.models import UsageWindow
+    from bridge.quotas import release_account, reserve_next_account
+
+    official = await Account.objects.acreate(
+        name="official",
+        tier=Account.TIER_OFFICIAL,
+        protocol=Account.PROTOCOL_CODEX,
+        auth_type=Account.AUTH_OAUTH,
+        quota_mode=Account.QUOTA_OFFICIAL,
+        base_url="https://chatgpt.com/backend-api/codex",
+        reserve_ratio=Decimal("0.02"),
+        safety_margin=Decimal("0"),
+        soft_reserve_ratio=Decimal("0.05"),
+        priority=1,
+        last_probe_at=timezone.now(),
+    )
+    await UsageWindow.objects.acreate(
+        account=official,
+        key=UsageWindow.OFFICIAL_5H,
+        utilization=Decimal("0.96"),
+    )
+    relay = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://relay.test",
+        priority=10,
+    )
+
+    picked = await sync_to_async(reserve_next_account)(
+        (), protocols=[Account.PROTOCOL_CODEX, Account.PROTOCOL_OPENAI], model="gpt-6.1-sol"
+    )
+    assert picked.name == "relay"
+    await sync_to_async(release_account)(picked.pk)
+
+    await Account.objects.filter(pk=relay.pk).aupdate(enabled=False)
+    picked = await sync_to_async(reserve_next_account)(
+        (), protocols=[Account.PROTOCOL_CODEX, Account.PROTOCOL_OPENAI], model="gpt-6.1-sol"
+    )
+    assert picked.name == "official"
+    await sync_to_async(release_account)(picked.pk)
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(BRIDGE={**BASE_BRIDGE})
+async def test_hard_reserve_blocks_official_entirely(official_settings):
+    from asgiref.sync import sync_to_async
+
+    from bridge.models import UsageWindow
+    from bridge.quotas import reserve_next_account
+
+    official = await Account.objects.acreate(
+        name="official",
+        tier=Account.TIER_OFFICIAL,
+        protocol=Account.PROTOCOL_CODEX,
+        auth_type=Account.AUTH_OAUTH,
+        quota_mode=Account.QUOTA_OFFICIAL,
+        base_url="https://chatgpt.com/backend-api/codex",
+        reserve_ratio=Decimal("0.02"),
+        safety_margin=Decimal("0"),
+        soft_reserve_ratio=Decimal("0.05"),
+        priority=1,
+        last_probe_at=timezone.now(),
+    )
+    await UsageWindow.objects.acreate(
+        account=official,
+        key=UsageWindow.OFFICIAL_5H,
+        utilization=Decimal("0.99"),
+    )
+    picked = await sync_to_async(reserve_next_account)(
+        (), protocols=[Account.PROTOCOL_CODEX], model="gpt-6.1-sol"
+    )
+    assert picked is None

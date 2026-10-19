@@ -107,7 +107,12 @@ class Account(models.Model):
         help_text="支持 {base_url} / {api_key} 占位符，remaining_paths 支持 a.b 和 a[*].b。",
     )
     reserve_ratio = models.DecimalField(
-        "保留比例", max_digits=5, decimal_places=4, default=Decimal("0.05")
+        "硬保留比例", max_digits=5, decimal_places=4, default=Decimal("0.05"),
+        help_text="到达后彻底禁用该账号。",
+    )
+    soft_reserve_ratio = models.DecimalField(
+        "软保留比例", max_digits=5, decimal_places=4, default=Decimal("0"),
+        help_text="到达后不再主动调用，仅作为最后兜底；0 表示不启用。",
     )
     safety_margin = models.DecimalField(
         "安全余量", max_digits=5, decimal_places=4, default=Decimal("0.005")
@@ -174,9 +179,19 @@ class Account(models.Model):
         return {w.key: w for w in self.windows.all()}
 
     def quota_limit(self) -> Decimal:
-        """Utilisation at which the account must stop being used."""
+        """Utilisation at which the account must stop being used (hard line)."""
         limit = Decimal("1") - self.reserve_ratio - self.safety_margin
         return max(Decimal("0"), limit)
+
+    def soft_quota_limit(self) -> Decimal:
+        """Utilisation at which the account stops being used actively."""
+        if not self.soft_reserve_ratio:
+            return self.quota_limit()
+        limit = Decimal("1") - self.soft_reserve_ratio - self.safety_margin
+        return max(Decimal("0"), min(limit, self.quota_limit()))
+
+    def at_soft_reserve(self) -> bool:
+        return self.utilization() >= self.soft_quota_limit()
 
     def relevant_windows(self) -> list["UsageWindow"]:
         windows = self.windows.all()
