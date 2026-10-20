@@ -273,6 +273,12 @@ async def proxy(request, path: str):
     if not _authorized(request):
         return _error(401, "authentication_error", "Invalid or missing bridge token")
 
+    # Never forward transport probes to paid upstreams.
+    if request.headers.get("upgrade", "").lower() == "websocket":
+        return HttpResponse(status=426)
+    if request.method in ("GET", "HEAD") and path.strip("/") == "v1":
+        return JsonResponse({"ok": True, "service": "cc-switch-bridge"})
+
     body = await _read_body(request)
     try:
         payload = json.loads(body) if body else {}
