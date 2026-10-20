@@ -495,6 +495,27 @@ async def _peek_stream(parser: SSEUsageParser, response, timeout: float = 20.0):
             return buffered, False, False, iterator
 
 
+async def _buffer_stream(parser: SSEUsageParser, response, max_bytes: int = 64 * 1024 * 1024, idle: float = 120.0):
+    """Consume the whole upstream stream so it can be validated before replay."""
+    chunks: list[bytes] = []
+    total = 0
+    iterator = response.aiter_bytes()
+    while True:
+        try:
+            chunk = await asyncio.wait_for(iterator.__anext__(), idle)
+        except StopAsyncIteration:
+            break
+        except asyncio.TimeoutError as exc:
+            raise StreamRejected("upstream stream timed out") from exc
+        parser.feed(chunk)
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise StreamRejected("upstream stream too large to buffer")
+    parser.finish()
+    return b"".join(chunks), parser
+
+
 async def _finalize_stream(
     account,
     client,
@@ -553,6 +574,48 @@ async def _success(
 
     # Official Codex returns SSE with an application/json content-type.
     is_stream = wants_stream or "text/event-stream" in content_type
+    if is_stream and account.protocol == Account.PROTOCOL_CODEX:
+        # Buffer official responses: capacity errors/truncated streams must be
+        # turned into a retry on another provider before anything reaches Codex.
+        content_type = "text/event-stream"
+        parser = SSEUsageParser()
+        body, parser = await _buffer_stream(parser, response)
+        if parser.error_message or not parser.completed:
+            await _close(client, response)
+            raise StreamRejected(
+                parser.error_message or "official stream ended before completion"
+            )
+        await _record(
+            account,
+            request_id=request_id,
+            path=path,
+            model=model,
+            status_code=response.status_code,
+            usage=parser.usage,
+            started=started,
+            ttft_ms=(
+                (parser.first_content_at - started) * 1000
+                if parser.first_content_at
+                else None
+            ),
+        )
+
+        async def replay():
+            try:
+                if body:
+                    yield body
+            finally:
+                await _close(client, response)
+                await sync_to_async(release_account)(account.pk)
+
+        streaming = StreamingHttpResponse(
+            replay(), status=response.status_code, content_type=content_type
+        )
+        for key, value in headers.items():
+            streaming[key] = value
+        streaming["X-Accel-Buffering"] = "no"
+        return streaming
+
     if is_stream:
         content_type = "text/event-stream"
         parser = SSEUsageParser()
