@@ -613,3 +613,35 @@ async def test_streaming_after_peek_keeps_usage(bridge_settings):
     assert log is not None
     assert log.input_tokens == 5
     assert log.output_tokens == 7
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_large_json_body_is_not_rejected(bridge_settings):
+    account = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://relay.test",
+        priority=10,
+    )
+    account.set_credential("sk-relay")
+    await account.asave()
+    respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "resp_big", "object": "response", "model": "gpt-6.1-sol"},
+            headers={"content-type": "application/json"},
+        )
+    )
+    big = "x" * (3 * 1024 * 1024)
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": big}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200

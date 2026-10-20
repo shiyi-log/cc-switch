@@ -92,6 +92,12 @@ TEMPLATES = [
     },
 ]
 
+
+# Codex conversations (including images/tool output) can be large.
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(
+    os.environ.get("DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE", 256 * 1024 * 1024)
+)
+FILE_UPLOAD_MAX_MEMORY_SIZE = DATA_UPLOAD_MAX_MEMORY_SIZE
 WSGI_APPLICATION = 'cc_switch.wsgi.application'
 
 
