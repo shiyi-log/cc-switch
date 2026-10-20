@@ -90,7 +90,7 @@ def recent_counts(minutes: int = 10) -> tuple[int, int, int]:
         rows = con.execute(
             "SELECT status_code, COUNT(*) FROM proxy_request_logs "
             "WHERE created_at >= ? AND model IS NOT NULL AND model <> '' "
-            "GROUP BY status_code",
+            "AND request_id NOT LIKE 'bridge:%' GROUP BY status_code",
             (since,),
         ).fetchall()
     finally:

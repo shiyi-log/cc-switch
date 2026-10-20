@@ -40,6 +40,10 @@ def mirror_request(
     """Best-effort insert; never let CC Switch DB problems break proxying."""
     if not settings.BRIDGE.get("CC_SWITCH_MIRROR"):
         return False
+    if status_code is None or status_code >= 400:
+        # Failed bridge attempts are not client-visible results; keep them out
+        # of CC Switch usage statistics.
+        return False
     provider_id = (account.cc_provider_id or "").strip()
     if not provider_id:
         return False
