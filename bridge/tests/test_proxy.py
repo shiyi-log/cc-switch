@@ -559,3 +559,57 @@ async def test_retries_multiple_rounds_until_budget(bridge_settings):
 
     assert response.status_code == 500
     assert route_a.call_count + route_b.call_count == 4
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_streaming_after_peek_keeps_usage(bridge_settings):
+    account = await make_official()
+    sse = (
+        b'event: response.created\ndata: {"type":"response.created",'
+        b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+        b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta",'
+        b'"delta":"ok"}\n\n'
+        b'event: response.completed\ndata: {"type":"response.completed",'
+        b'"response":{"model":"gpt-6.1-sol","usage":'
+        b'{"input_tokens":5,"output_tokens":7}}}\n\n'
+    )
+    respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200, content=sse, headers={"content-type": "text/event-stream"}
+        )
+    )
+    # use the OpenAI relay path so the official provider toggle is irrelevant
+    relay = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://relay.test",
+        priority=10,
+    )
+    relay.set_credential("sk-relay")
+    await relay.asave()
+    respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200, content=sse, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi", "stream": True}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200
+    _ = [chunk async for chunk in response.streaming_content]
+    import asyncio
+
+    await asyncio.sleep(0.2)
+    log = await RequestLog.objects.filter(account=relay).order_by("-created_at").afirst()
+    assert log is not None
+    assert log.input_tokens == 5
+    assert log.output_tokens == 7

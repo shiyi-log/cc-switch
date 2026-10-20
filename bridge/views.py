@@ -473,29 +473,52 @@ async def _peek_stream(parser: SSEUsageParser, response, timeout: float = 20.0):
         try:
             chunk = await asyncio.wait_for(iterator.__anext__(), timeout)
         except StopAsyncIteration:
-            return buffered, True, bool(parser.error_message)
+            return buffered, True, bool(parser.error_message), iterator
         except asyncio.TimeoutError:
-            return buffered, False, bool(parser.error_message)
+            return buffered, False, bool(parser.error_message), iterator
         parser.feed(chunk)
         buffered.append(chunk)
         total += len(chunk)
         if parser.error_message:
-            return buffered, False, True
+            return buffered, False, True, iterator
         if parser.first_content_at is not None or total >= 65536:
-            return buffered, False, False
+            return buffered, False, False, iterator
 
 
 async def _finalize_stream(
-    account, client, response, request_id, path, model, usage, first_content_at, started, status_code
+    account,
+    client,
+    response,
+    request_id,
+    path,
+    model,
+    usage,
+    first_content_at,
+    started,
+    status_code,
+    completed=True,
 ):
     try:
         await _close(client, response)
+        reason = ""
+        final_status = status_code
+        if (
+            account.protocol == Account.PROTOCOL_CODEX
+            and not completed
+            and not usage
+        ):
+            # Official capacity errors look like a truncated stream with no usage.
+            await sync_to_async(_block_model)(account.pk, model)
+            await sync_to_async(mark_failure)(account.pk, "stream ended before completion", 502)
+            final_status = 502
+            reason = "stream ended before completion"
         await _record(
             account,
             request_id=request_id,
             path=path,
             model=model,
-            status_code=status_code,
+            status_code=final_status,
+            blocked_reason=reason,
             usage=usage,
             started=started,
             ttft_ms=(
@@ -519,7 +542,7 @@ async def _success(
     if is_stream:
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        buffered, ended, rejected = await _peek_stream(parser, response)
+        buffered, ended, rejected, iterator = await _peek_stream(parser, response)
         incomplete_official = (
             account.protocol == Account.PROTOCOL_CODEX
             and ended
@@ -536,7 +559,7 @@ async def _success(
             try:
                 for chunk in buffered:
                     yield chunk
-                async for chunk in response.aiter_bytes():
+                async for chunk in iterator:
                     parser.feed(chunk)
                     yield chunk
                 parser.finish()
@@ -557,6 +580,7 @@ async def _success(
                         parser.first_content_at,
                         started,
                         response.status_code,
+                        parser.completed,
                     )
                 )
 
