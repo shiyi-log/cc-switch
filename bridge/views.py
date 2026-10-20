@@ -276,7 +276,7 @@ async def proxy(request, path: str):
     # Never forward transport probes to paid upstreams.
     if request.headers.get("upgrade", "").lower() == "websocket":
         return HttpResponse(status=426)
-    if request.method in ("GET", "HEAD") and path.strip("/") == "v1":
+    if request.method in ("GET", "HEAD") and path.strip("/") in ("", "v1"):
         return JsonResponse({"ok": True, "service": "cc-switch-bridge"})
 
     body = await _read_body(request)

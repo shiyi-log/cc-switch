@@ -11,5 +11,6 @@ urlpatterns = [
         views.refresh_account,
         name="bridge-refresh-account",
     ),
+    path("v1", views.proxy, {"path": ""}, name="bridge-proxy-root"),
     re_path(r"^v1/(?P<path>.*)$", views.proxy, name="bridge-proxy"),
 ]
