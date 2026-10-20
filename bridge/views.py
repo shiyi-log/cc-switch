@@ -119,6 +119,16 @@ def _protocols_for_path(path: str) -> list[str] | None:
     return None
 
 
+def _temp_block_model(account_id, model: str, seconds: int = 300) -> None:
+    account = Account.objects.filter(pk=account_id).first()
+    if account is None or not model:
+        return
+    blocks = dict(account.model_block_until or {})
+    blocks[model] = int(time.time()) + seconds
+    account.model_block_until = blocks
+    account.save(update_fields=["model_block_until"])
+
+
 def _block_model(account_id, model: str) -> None:
     account = Account.objects.filter(pk=account_id).first()
     if account is None or not model:
@@ -508,7 +518,7 @@ async def _finalize_stream(
             and not usage
         ):
             # Official capacity errors look like a truncated stream with no usage.
-            await sync_to_async(_block_model)(account.pk, model)
+            await sync_to_async(_temp_block_model)(account.pk, model, 300)
             await sync_to_async(mark_failure)(account.pk, "stream ended before completion", 502)
             final_status = 502
             reason = "stream ended before completion"

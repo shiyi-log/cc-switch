@@ -198,10 +198,12 @@ def _candidates(
     if protocols:
         accounts = [account for account in accounts if account.protocol in protocols]
     if model:
+        now_ts = now.timestamp()
         accounts = [
             account
             for account in accounts
             if model not in (account.blocked_models or [])
+            and float((account.model_block_until or {}).get(model, 0)) <= now_ts
         ]
     available = [
         account for account in accounts if account.is_available(now, ignore_cooldown)

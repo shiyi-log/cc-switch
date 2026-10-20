@@ -151,6 +151,10 @@ class Account(models.Model):
     last_used_at = models.DateTimeField("最近使用", null=True, blank=True)
 
     blocked_models = models.JSONField("不支持的模型", default=list, blank=True)
+    model_block_until = models.JSONField(
+        "临时屏蔽模型", default=dict, blank=True,
+        help_text="{model: unix_ts}，到期自动恢复，用于容量不足等临时错误。",
+    )
     extra_headers = models.JSONField("附加请求头", default=dict, blank=True)
     last_probe_at = models.DateTimeField("最近查询时间", null=True, blank=True)
     last_probe_error = models.TextField("最近查询错误", blank=True, default="")

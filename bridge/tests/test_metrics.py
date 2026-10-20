@@ -175,3 +175,22 @@ def test_slow_preferred_channel_falls_back():
     account = reserve_next_account(protocols=[Account.PROTOCOL_OPENAI], model="gpt-6.1-sol")
     assert account.name == "fallback"
     release_account(account.pk)
+
+
+@override_settings(BRIDGE=BRIDGE)
+@pytest.mark.django_db
+def test_temporary_model_block_expires():
+    import time
+
+    from bridge.quotas import available_accounts
+
+    account = relay("relay")
+    account.model_block_until = {"gpt-6.1-sol": int(time.time()) + 300}
+    account.save(update_fields=["model_block_until"])
+    names = {a.name for a in available_accounts(model="gpt-6.1-sol")}
+    assert "relay" not in names
+
+    account.model_block_until = {"gpt-6.1-sol": int(time.time()) - 1}
+    account.save(update_fields=["model_block_until"])
+    names = {a.name for a in available_accounts(model="gpt-6.1-sol")}
+    assert "relay" in names
