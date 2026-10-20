@@ -517,9 +517,13 @@ async def _finalize_stream(
             and not completed
             and not usage
         ):
-            # Official capacity errors look like a truncated stream with no usage.
-            await sync_to_async(_temp_block_model)(account.pk, model, 60)
-            await sync_to_async(mark_failure)(account.pk, "stream ended before completion", 502)
+            # Official capacity errors look like a truncated stream with no
+            # usage. Bench it briefly (pool cooldown ~5s) so an immediate retry
+            # falls back to third parties, while the next new request still
+            # tries the official account first.
+            await sync_to_async(mark_failure)(
+                account.pk, "stream ended before completion", 502
+            )
             final_status = 502
             reason = "stream ended before completion"
         await _record(
