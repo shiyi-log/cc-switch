@@ -349,7 +349,8 @@ async def proxy(request, path: str):
             except Exception as exc:  # noqa: BLE001 - network failures are retried
                 logger.warning("upstream request failed for %s: %s", account.name, exc)
                 last_error_message = str(exc)
-                await sync_to_async(mark_failure)(account.pk, str(exc))
+                if account.protocol != Account.PROTOCOL_CODEX:
+                    await sync_to_async(mark_failure)(account.pk, str(exc))
                 await sync_to_async(_log_request)(
                     account=account,
                     request_id=request_id,
@@ -381,7 +382,8 @@ async def proxy(request, path: str):
                 except StreamRejected as exc:
                     last_error_message = str(exc)
                     last_error_status = 502
-                    await sync_to_async(mark_failure)(account.pk, str(exc), 502)
+                    if account.protocol != Account.PROTOCOL_CODEX:
+                        await sync_to_async(mark_failure)(account.pk, str(exc), 502)
                     await sync_to_async(_log_request)(
                         account=account,
                         request_id=request_id,
@@ -417,7 +419,7 @@ async def proxy(request, path: str):
             last_error_status = status_code
             last_error_content = content
             last_error_type = response.headers.get("content-type", "application/json")
-            if retryable:
+            if retryable and account.protocol != Account.PROTOCOL_CODEX:
                 await sync_to_async(mark_failure)(account.pk, message, status_code)
             await sync_to_async(_log_request)(
                 account=account,
@@ -548,9 +550,6 @@ async def _finalize_stream(
             # usage. Bench it briefly (pool cooldown ~5s) so an immediate retry
             # falls back to third parties, while the next new request still
             # tries the official account first.
-            await sync_to_async(mark_failure)(
-                account.pk, "stream ended before completion", 502
-            )
             final_status = 502
             reason = "stream ended before completion"
         await _record(
