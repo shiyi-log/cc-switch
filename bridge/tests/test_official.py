@@ -320,3 +320,50 @@ async def test_capacity_stream_event_fails_over(official_settings):
 
     refreshed = await Account.objects.aget(pk=official.pk)
     assert refreshed.cooldown_until is not None
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_official_stream_without_completion_fails_over(official_settings):
+    official = await make_official("0.10")
+    relay = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://relay.test",
+        priority=10,
+    )
+    relay.set_credential("sk-relay")
+    await relay.asave()
+
+    respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=(
+                b'event: response.created\ndata: {"type":"response.created",'
+                b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+            ),
+            headers={"content-type": "application/json"},
+        )
+    )
+    route = respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200,
+            json={"id": "resp_relay", "object": "response", "model": "gpt-6.1-sol"},
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi", "stream": True}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200
+    assert route.call_count == 1
+    refreshed = await Account.objects.aget(pk=official.pk)
+    assert refreshed.cooldown_until is not None

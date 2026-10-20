@@ -165,6 +165,7 @@ class SSEUsageParser:
         self.model = ""
         self.first_content_at: float | None = None
         self.error_message: str = ""
+        self.completed: bool = False
 
     def feed(self, chunk: bytes) -> None:
         self.buffer += chunk
@@ -212,6 +213,8 @@ class SSEUsageParser:
             "response.content_part.added",
         ) and self.first_content_at is None:
             self.first_content_at = time.monotonic()
+        if event_type == "response.completed":
+            self.completed = True
         if event_type in (
             "response.created",
             "response.in_progress",

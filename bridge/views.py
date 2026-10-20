@@ -472,15 +472,17 @@ async def _peek_stream(parser: SSEUsageParser, response, timeout: float = 20.0):
     while True:
         try:
             chunk = await asyncio.wait_for(iterator.__anext__(), timeout)
-        except (StopAsyncIteration, asyncio.TimeoutError):
-            return buffered, bool(parser.error_message)
+        except StopAsyncIteration:
+            return buffered, True, bool(parser.error_message)
+        except asyncio.TimeoutError:
+            return buffered, False, bool(parser.error_message)
         parser.feed(chunk)
         buffered.append(chunk)
         total += len(chunk)
         if parser.error_message:
-            return buffered, True
+            return buffered, False, True
         if parser.first_content_at is not None or total >= 65536:
-            return buffered, False
+            return buffered, False, False
 
 
 async def _finalize_stream(
@@ -517,10 +519,18 @@ async def _success(
     if is_stream:
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        buffered, rejected = await _peek_stream(parser, response)
-        if rejected:
+        buffered, ended, rejected = await _peek_stream(parser, response)
+        incomplete_official = (
+            account.protocol == Account.PROTOCOL_CODEX
+            and ended
+            and not parser.completed
+            and parser.first_content_at is None
+        )
+        if rejected or incomplete_official:
             await _close(client, response)
-            raise StreamRejected(parser.error_message or "upstream stream failed")
+            raise StreamRejected(
+                parser.error_message or "upstream stream ended before completion"
+            )
 
         async def stream_body():
             try:
