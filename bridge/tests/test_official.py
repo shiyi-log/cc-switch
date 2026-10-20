@@ -319,7 +319,7 @@ async def test_capacity_stream_event_fails_over(official_settings):
     assert route.call_count == 1
 
     refreshed = await Account.objects.aget(pk=official.pk)
-    assert refreshed.cooldown_until is not None
+    assert refreshed.cooldown_until is None  # official is never benched
 
 
 @pytest.mark.django_db(transaction=True)
@@ -366,4 +366,4 @@ async def test_official_stream_without_completion_fails_over(official_settings):
     assert response.status_code == 200
     assert route.call_count == 1
     refreshed = await Account.objects.aget(pk=official.pk)
-    assert refreshed.cooldown_until is not None
+    assert refreshed.cooldown_until is None  # official is never benched
