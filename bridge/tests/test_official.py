@@ -265,3 +265,58 @@ async def test_hard_reserve_blocks_official_entirely(official_settings):
         (), protocols=[Account.PROTOCOL_CODEX], model="gpt-6.1-sol"
     )
     assert picked is None
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_capacity_stream_event_fails_over(official_settings):
+    from bridge.models import RequestLog
+
+    official = await make_official("0.10")
+    relay = await Account.objects.acreate(
+        name="relay",
+        tier=Account.TIER_THIRD_PARTY,
+        protocol=Account.PROTOCOL_OPENAI,
+        auth_type=Account.AUTH_API_KEY,
+        quota_mode=Account.QUOTA_NONE,
+        base_url="https://relay.test",
+        priority=10,
+    )
+    relay.set_credential("sk-relay")
+    await relay.asave()
+
+    respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=(
+                b'event: response.failed\ndata: {"type":"response.failed",'
+                b'"response":{"error":{"message":"Selected model is at capacity."}}}\n\n'
+            ),
+            headers={"content-type": "application/json"},
+        )
+    )
+    relay_sse = (
+        b'event: response.created\ndata: {"type":"response.created",'
+        b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+        b'event: response.completed\ndata: {"type":"response.completed",'
+        b'"response":{"model":"gpt-6.1-sol","usage":{"input_tokens":3,"output_tokens":2}}}\n\n'
+    )
+    route = respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200, content=relay_sse, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi", "stream": True}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200
+    _ = [chunk async for chunk in response.streaming_content]
+    assert route.call_count == 1
+
+    refreshed = await Account.objects.aget(pk=official.pk)
+    assert refreshed.cooldown_until is not None

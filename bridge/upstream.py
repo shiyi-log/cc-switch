@@ -164,6 +164,7 @@ class SSEUsageParser:
         self.usage: dict[str, int] = {}
         self.model = ""
         self.first_content_at: float | None = None
+        self.error_message: str = ""
 
     def feed(self, chunk: bytes) -> None:
         self.buffer += chunk
@@ -196,6 +197,15 @@ class SSEUsageParser:
         if not isinstance(event, dict):
             return
         event_type = event.get("type")
+        if event_type == "error":
+            error = event.get("error") if isinstance(event.get("error"), dict) else event
+            self.error_message = str(error.get("message") or "upstream error")
+            return
+        if event_type == "response.failed":
+            response = event.get("response") or {}
+            error = response.get("error") or event.get("error") or {}
+            self.error_message = str(error.get("message") or "response failed")
+            return
         if event_type in (
             "content_block_delta",
             "response.output_text.delta",

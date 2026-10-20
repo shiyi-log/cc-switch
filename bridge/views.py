@@ -43,6 +43,10 @@ from .upstream import (
 logger = logging.getLogger("bridge")
 
 RETRYABLE_STATUS = {401, 403, 408, 429, 500, 502, 503, 504}
+
+
+class StreamRejected(Exception):
+    """Upstream started a stream but immediately reported a failure event."""
 HOP_BY_HOP = {
     "connection",
     "keep-alive",
@@ -346,17 +350,31 @@ async def proxy(request, path: str):
                 logger.exception("failed to persist quota headers")
 
             if response.status_code < 400:
-                result = await _success(
-                    account,
-                    client,
-                    response,
-                    request,
-                    path_only,
-                    request_id,
-                    model,
-                    started,
-                    wants_stream,
-                )
+                try:
+                    result = await _success(
+                        account,
+                        client,
+                        response,
+                        request,
+                        path_only,
+                        request_id,
+                        model,
+                        started,
+                        wants_stream,
+                    )
+                except StreamRejected as exc:
+                    last_error_message = str(exc)
+                    last_error_status = 502
+                    await sync_to_async(mark_failure)(account.pk, str(exc), 502)
+                    await sync_to_async(_log_request)(
+                        account=account,
+                        request_id=request_id,
+                        path=path_only,
+                        model=model,
+                        status_code=502,
+                        blocked_reason=str(exc),
+                    )
+                    continue
                 # Streaming responses release the account in their generator.
                 handed_off = isinstance(result, StreamingHttpResponse)
                 return result
@@ -446,6 +464,25 @@ async def proxy(request, path: str):
     )
 
 
+async def _peek_stream(parser: SSEUsageParser, response, timeout: float = 20.0):
+    """Read until first content event or an immediate failure event."""
+    buffered: list[bytes] = []
+    total = 0
+    iterator = response.aiter_bytes()
+    while True:
+        try:
+            chunk = await asyncio.wait_for(iterator.__anext__(), timeout)
+        except (StopAsyncIteration, asyncio.TimeoutError):
+            return buffered, bool(parser.error_message)
+        parser.feed(chunk)
+        buffered.append(chunk)
+        total += len(chunk)
+        if parser.error_message:
+            return buffered, True
+        if parser.first_content_at is not None or total >= 65536:
+            return buffered, False
+
+
 async def _finalize_stream(
     account, client, response, request_id, path, model, usage, first_content_at, started, status_code
 ):
@@ -480,9 +517,15 @@ async def _success(
     if is_stream:
         content_type = "text/event-stream"
         parser = SSEUsageParser()
+        buffered, rejected = await _peek_stream(parser, response)
+        if rejected:
+            await _close(client, response)
+            raise StreamRejected(parser.error_message or "upstream stream failed")
 
         async def stream_body():
             try:
+                for chunk in buffered:
+                    yield chunk
                 async for chunk in response.aiter_bytes():
                     parser.feed(chunk)
                     yield chunk
