@@ -382,6 +382,8 @@ async def proxy(request, path: str):
                     last_error_message = str(exc)
                     last_error_status = 502
                     await sync_to_async(mark_failure)(account.pk, str(exc), 502)
+                    if account.protocol == Account.PROTOCOL_CODEX and model:
+                        await sync_to_async(_temp_block_model)(account.pk, model, 60)
                     await sync_to_async(_log_request)(
                         account=account,
                         request_id=request_id,
@@ -551,6 +553,8 @@ async def _finalize_stream(
             await sync_to_async(mark_failure)(
                 account.pk, "stream ended before completion", 502
             )
+            if model:
+                await sync_to_async(_temp_block_model)(account.pk, model, 60)
             final_status = 502
             reason = "stream ended before completion"
         await _record(
