@@ -89,7 +89,8 @@ def recent_counts(minutes: int = 10) -> tuple[int, int, int]:
         since = int(time.time()) - minutes * 60
         rows = con.execute(
             "SELECT status_code, COUNT(*) FROM proxy_request_logs "
-            "WHERE created_at >= ? GROUP BY status_code",
+            "WHERE created_at >= ? AND model IS NOT NULL AND model <> '' "
+            "GROUP BY status_code",
             (since,),
         ).fetchall()
     finally:
