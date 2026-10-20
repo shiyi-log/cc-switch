@@ -93,11 +93,13 @@ TEMPLATES = [
 ]
 
 
-# Codex conversations (including images/tool output) can be large.
-DATA_UPLOAD_MAX_MEMORY_SIZE = int(
-    os.environ.get("DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE", 256 * 1024 * 1024)
+# Codex conversations (including images/tool output) can be arbitrarily large.
+# None disables Django's request-body size check entirely.
+_data_upload_limit = os.environ.get("DJANGO_DATA_UPLOAD_MAX_MEMORY_SIZE", "none").lower()
+DATA_UPLOAD_MAX_MEMORY_SIZE = (
+    None if _data_upload_limit in ("none", "unlimited", "0") else int(_data_upload_limit)
 )
-FILE_UPLOAD_MAX_MEMORY_SIZE = DATA_UPLOAD_MAX_MEMORY_SIZE
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024 * 1024
 WSGI_APPLICATION = 'cc_switch.wsgi.application'
 
 
