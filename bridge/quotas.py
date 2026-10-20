@@ -212,9 +212,6 @@ def _candidates(
 
     official = [a for a in available if a.tier == Account.TIER_OFFICIAL]
     third_party = [a for a in available if a.tier == Account.TIER_THIRD_PARTY]
-    preferred = [a for a in third_party if a.preferred]
-    fallback = [a for a in third_party if not a.preferred]
-
     penalty = int(settings.BRIDGE.get("SLOW_PENALTY_SECONDS", 600))
 
     def recently_slow(account: Account) -> bool:
@@ -223,10 +220,8 @@ def _candidates(
             and (now - account.last_slow_at).total_seconds() < penalty
         )
 
-    preferred_healthy = [a for a in preferred if not recently_slow(a)]
-    preferred_slow = [a for a in preferred if recently_slow(a)]
-    fallback_healthy = [a for a in fallback if not recently_slow(a)]
-    fallback_slow = [a for a in fallback if recently_slow(a)]
+    third_healthy = [a for a in third_party if not recently_slow(a)]
+    third_slow = [a for a in third_party if recently_slow(a)]
 
     official_active = [a for a in official if not a.at_soft_reserve()]
     official_fallback = [a for a in official if a.at_soft_reserve()]
@@ -240,14 +235,11 @@ def _candidates(
             return ranked
         return [chosen] + [a for a in ranked if a.pk != chosen.pk]
 
-    # Preferred channels first, but a slow preferred channel must not block a
-    # healthy fallback channel.
+    # Speed-first: all third-party channels compete in one pool.
     return (
         order(official_active)
-        + order(preferred_healthy)
-        + order(fallback_healthy)
-        + order(preferred_slow)
-        + order(fallback_slow)
+        + order(third_healthy)
+        + order(third_slow)
         + order(official_fallback)
     )
 
