@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -12,6 +13,46 @@ from django.conf import settings
 from .models import Account
 
 logger = logging.getLogger("bridge")
+
+_KEY_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def provider_api_key(provider_id: str, max_age: float = 30.0) -> str:
+    """Read the current API key for a provider from CC Switch (short cache)."""
+    if not provider_id:
+        return ""
+    now = time.time()
+    cached = _KEY_CACHE.get(provider_id)
+    if cached and now - cached[0] < max_age:
+        return cached[1]
+    key = ""
+    path = Path(
+        settings.BRIDGE.get("CC_SWITCH_DB_PATH")
+        or Path.home() / ".cc-switch/cc-switch.db"
+    )
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
+        try:
+            row = con.execute(
+                "SELECT settings_config FROM providers WHERE id=?", (provider_id,)
+            ).fetchone()
+        finally:
+            con.close()
+        if row:
+            auth = (json.loads(row[0]).get("auth") or {})
+            for name in (
+                "OPENAI_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "ANTHROPIC_API_KEY",
+                "api_key",
+            ):
+                if auth.get(name):
+                    key = str(auth[name])
+                    break
+    except Exception:  # noqa: BLE001 - best effort
+        return cached[1] if cached else ""
+    _KEY_CACHE[provider_id] = (now, key)
+    return key
 
 
 def _app_type(account: Account) -> str:

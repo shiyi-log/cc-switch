@@ -355,6 +355,14 @@ async def proxy(request, path: str):
         round_excluded.add(account.pk)
         handed_off = False
         try:
+            if account.cc_provider_id and account.auth_type == Account.AUTH_API_KEY:
+                fresh_key = await sync_to_async(provider_api_key)(
+                    account.cc_provider_id
+                )
+                if fresh_key and fresh_key != account.credential_plain:
+                    account.set_credential(fresh_key)
+                    await sync_to_async(account.save)(update_fields=["credential"])
+                    logger.info("credential refreshed for %s", account.name)
             forward_body = body
             if account.protocol == Account.PROTOCOL_CODEX:
                 forward_body = prepare_codex_body(body)
