@@ -304,6 +304,19 @@ async def proxy(request, path: str):
     round_no = 0
     forced_ignore_cooldown = False
     round_excluded: set = set()
+    always_excluded: set = set()
+    if not wants_stream:
+        # Official Codex only supports streaming responses; skip it for
+        # non-streaming calls (e.g. remote compaction).
+        always_excluded = set(
+            await sync_to_async(
+                lambda: list(
+                    Account.objects.filter(tier=Account.TIER_OFFICIAL).values_list(
+                        "pk", flat=True
+                    )
+                )
+            )()
+        )
     last_error_message = ""
     last_error_status = None
     last_error_content = b""
@@ -311,7 +324,7 @@ async def proxy(request, path: str):
 
     while attempts < max_attempts:
         account = await sync_to_async(reserve_next_account)(
-            round_excluded,
+            round_excluded | always_excluded,
             protocols=protocols,
             model=model,
             ignore_cooldown=round_no > 0,
