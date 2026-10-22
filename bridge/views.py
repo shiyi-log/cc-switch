@@ -510,6 +510,7 @@ async def _buffer_stream(
     idle: float = 120.0,
     timeout: float | None = None,
     stop_at_content: bool = False,
+    stop_after_events: int = 0,
 ):
     """Buffer up to `timeout` seconds; then let the caller stream the rest."""
     chunks: list[bytes] = []
@@ -539,6 +540,8 @@ async def _buffer_stream(
         if total > max_bytes:
             raise StreamRejected("upstream stream too large to buffer")
         if stop_at_content and parser.first_content_at is not None:
+            return b"".join(chunks), iterator, False
+        if stop_after_events and parser.events >= stop_after_events:
             return b"".join(chunks), iterator, False
 
 
@@ -604,7 +607,11 @@ async def _success(
         parser = SSEUsageParser()
         buffer_seconds = float(settings.BRIDGE.get("OFFICIAL_BUFFER_SECONDS", 3))
         body, iterator, ended = await _buffer_stream(
-            parser, response, timeout=buffer_seconds, stop_at_content=True
+            parser,
+            response,
+            timeout=buffer_seconds,
+            stop_at_content=True,
+            stop_after_events=2,
         )
         if parser.error_message:
             await _close(client, response)

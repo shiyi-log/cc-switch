@@ -166,6 +166,7 @@ class SSEUsageParser:
         self.first_content_at: float | None = None
         self.error_message: str = ""
         self.completed: bool = False
+        self.events: int = 0
 
     def feed(self, chunk: bytes) -> None:
         self.buffer += chunk
@@ -197,6 +198,7 @@ class SSEUsageParser:
             return
         if not isinstance(event, dict):
             return
+        self.events += 1
         event_type = event.get("type")
         if event_type == "error":
             error = event.get("error") if isinstance(event.get("error"), dict) else event
