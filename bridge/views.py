@@ -509,6 +509,7 @@ async def _buffer_stream(
     max_bytes: int = 64 * 1024 * 1024,
     idle: float = 120.0,
     timeout: float | None = None,
+    stop_at_content: bool = False,
 ):
     """Buffer up to `timeout` seconds; then let the caller stream the rest."""
     chunks: list[bytes] = []
@@ -537,6 +538,8 @@ async def _buffer_stream(
         total += len(chunk)
         if total > max_bytes:
             raise StreamRejected("upstream stream too large to buffer")
+        if stop_at_content and parser.first_content_at is not None:
+            return b"".join(chunks), iterator, False
 
 
 async def _finalize_stream(
@@ -599,9 +602,9 @@ async def _success(
         # turned into a retry on another provider before anything reaches Codex.
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        buffer_seconds = float(settings.BRIDGE.get("OFFICIAL_BUFFER_SECONDS", 10))
+        buffer_seconds = float(settings.BRIDGE.get("OFFICIAL_BUFFER_SECONDS", 3))
         body, iterator, ended = await _buffer_stream(
-            parser, response, timeout=buffer_seconds
+            parser, response, timeout=buffer_seconds, stop_at_content=True
         )
         if parser.error_message:
             await _close(client, response)
