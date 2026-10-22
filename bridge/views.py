@@ -503,25 +503,40 @@ async def _peek_stream(parser: SSEUsageParser, response, timeout: float = 20.0):
             return buffered, False, False, iterator
 
 
-async def _buffer_stream(parser: SSEUsageParser, response, max_bytes: int = 64 * 1024 * 1024, idle: float = 120.0):
-    """Consume the whole upstream stream so it can be validated before replay."""
+async def _buffer_stream(
+    parser: SSEUsageParser,
+    response,
+    max_bytes: int = 64 * 1024 * 1024,
+    idle: float = 120.0,
+    timeout: float | None = None,
+):
+    """Buffer up to `timeout` seconds; then let the caller stream the rest."""
     chunks: list[bytes] = []
     total = 0
     iterator = response.aiter_bytes()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout if timeout else None
     while True:
+        wait = idle
+        if deadline is not None:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return b"".join(chunks), iterator, False
+            wait = min(wait, remaining)
         try:
-            chunk = await asyncio.wait_for(iterator.__anext__(), idle)
+            chunk = await asyncio.wait_for(iterator.__anext__(), wait)
         except StopAsyncIteration:
-            break
-        except asyncio.TimeoutError as exc:
-            raise StreamRejected("upstream stream timed out") from exc
+            parser.finish()
+            return b"".join(chunks), iterator, True
+        except asyncio.TimeoutError:
+            if deadline is not None and loop.time() >= deadline:
+                return b"".join(chunks), iterator, False
+            raise StreamRejected("upstream stream timed out")
         parser.feed(chunk)
         chunks.append(chunk)
         total += len(chunk)
         if total > max_bytes:
             raise StreamRejected("upstream stream too large to buffer")
-    parser.finish()
-    return b"".join(chunks), parser
 
 
 async def _finalize_stream(
@@ -584,12 +599,49 @@ async def _success(
         # turned into a retry on another provider before anything reaches Codex.
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        body, parser = await _buffer_stream(parser, response)
-        if parser.error_message or not parser.completed:
+        buffer_seconds = float(settings.BRIDGE.get("OFFICIAL_BUFFER_SECONDS", 10))
+        body, iterator, ended = await _buffer_stream(
+            parser, response, timeout=buffer_seconds
+        )
+        if parser.error_message:
             await _close(client, response)
-            raise StreamRejected(
-                parser.error_message or "official stream ended before completion"
+            raise StreamRejected(parser.error_message)
+        if ended and not parser.completed:
+            await _close(client, response)
+            raise StreamRejected("official stream ended before completion")
+        if not ended:
+            async def live_stream():
+                try:
+                    if body:
+                        yield body
+                    async for chunk in iterator:
+                        parser.feed(chunk)
+                        yield chunk
+                    parser.finish()
+                finally:
+                    asyncio.create_task(
+                        _finalize_stream(
+                            account,
+                            client,
+                            response,
+                            request_id,
+                            path,
+                            model,
+                            parser.usage,
+                            parser.first_content_at,
+                            started,
+                            response.status_code,
+                            parser.completed,
+                        )
+                    )
+
+            streaming = StreamingHttpResponse(
+                live_stream(), status=response.status_code, content_type=content_type
             )
+            for key, value in headers.items():
+                streaming[key] = value
+            streaming["X-Accel-Buffering"] = "no"
+            return streaming
         await _record(
             account,
             request_id=request_id,
