@@ -633,7 +633,6 @@ async def _success(
             response,
             timeout=buffer_seconds,
             stop_at_content=True,
-            stop_after_events=2,
         )
         if parser.error_message:
             await _close(client, response)
