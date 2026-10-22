@@ -627,52 +627,19 @@ async def _success(
         # turned into a retry on another provider before anything reaches Codex.
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        buffer_seconds = float(settings.BRIDGE.get("OFFICIAL_BUFFER_SECONDS", 3))
-        body, iterator, ended = await _buffer_stream(
-            parser,
-            response,
-            timeout=buffer_seconds,
-            stop_at_content=True,
-        )
+        # Official streams can be truncated mid-response when overloaded.
+        # Buffer the whole stream so a truncated one can be retried on another
+        # provider before anything reaches Codex.
+        body, iterator, ended = await _buffer_stream(parser, response)
         if parser.error_message:
             await _close(client, response)
             raise StreamRejected(parser.error_message)
         if ended and not parser.completed:
             await _close(client, response)
             raise StreamRejected("official stream ended before completion")
-        if not ended:
-            async def live_stream():
-                try:
-                    if body:
-                        yield body
-                    async for chunk in iterator:
-                        parser.feed(chunk)
-                        yield chunk
-                    parser.finish()
-                finally:
-                    asyncio.create_task(
-                        _finalize_stream(
-                            account,
-                            client,
-                            response,
-                            request_id,
-                            path,
-                            model,
-                            parser.usage,
-                            parser.first_content_at,
-                            started,
-                            response.status_code,
-                            parser.completed,
-                        )
-                    )
-
-            streaming = StreamingHttpResponse(
-                live_stream(), status=response.status_code, content_type=content_type
-            )
-            for key, value in headers.items():
-                streaming[key] = value
-            streaming["X-Accel-Buffering"] = "no"
-            return streaming
+        if not parser.completed:
+            await _close(client, response)
+            raise StreamRejected("official stream ended before completion")
         await _record(
             account,
             request_id=request_id,
