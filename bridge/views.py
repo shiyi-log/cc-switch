@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import Account, RequestLog
-from .ccswitch import reattribute_request
+from .ccswitch import provider_api_key, reattribute_request
 from .metrics import update_account_stats
 from .official import refresh_official_quotas
 from .probe import probe_account, refresh_stale_probes
