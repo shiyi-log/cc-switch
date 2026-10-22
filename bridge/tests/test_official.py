@@ -96,24 +96,31 @@ async def test_official_without_quota_is_not_used(official_settings):
 async def test_official_is_preferred_below_reserve(official_settings):
     await make_official("0.50")
     await make_relay()
+    sse = (
+        b'event: response.created\ndata: {"type":"response.created",'
+        b'"response":{"id":"resp_official","model":"gpt-6.1-sol"}}\n\n'
+        b'event: response.output_text.delta\ndata: {"type":"response.output_text.delta",'
+        b'"delta":"ok"}\n\n'
+        b'event: response.completed\ndata: {"type":"response.completed",'
+        b'"response":{"id":"resp_official","model":"gpt-6.1-sol","usage":'
+        b'{"input_tokens":3,"output_tokens":2}}}\n\n'
+    )
     route = respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
         return_value=httpx.Response(
-            200,
-            json={"id": "resp_official", "object": "response", "model": "gpt-6.1-sol"},
-            headers={"content-type": "application/json"},
+            200, content=sse, headers={"content-type": "application/json"}
         )
     )
 
     client = AsyncClient()
     response = await client.post(
         "/v1/responses",
-        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi"}),
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi", "stream": True}),
         content_type="application/json",
         headers={"x-bridge-token": "test-token"},
     )
 
     assert response.status_code == 200
-    assert response.json()["id"] == "resp_official"
+    _ = [chunk async for chunk in response.streaming_content]
     request = route.calls[0].request
     assert request.headers["authorization"] == "Bearer official-token"
     assert request.headers["chatgpt-account-id"] == "acct-1"

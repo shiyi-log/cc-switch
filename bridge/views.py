@@ -311,9 +311,10 @@ async def proxy(request, path: str):
         always_excluded = set(
             await sync_to_async(
                 lambda: list(
-                    Account.objects.filter(tier=Account.TIER_OFFICIAL).values_list(
-                        "pk", flat=True
-                    )
+                    Account.objects.filter(
+                        tier=Account.TIER_OFFICIAL,
+                        protocol=Account.PROTOCOL_CODEX,
+                    ).values_list("pk", flat=True)
                 )
             )()
         )
