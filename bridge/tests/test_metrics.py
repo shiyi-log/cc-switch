@@ -1,11 +1,14 @@
 from decimal import Decimal
 
 import pytest
+from django.conf import settings as dj_settings
 from django.test import override_settings
 
 from bridge.metrics import rank_accounts, update_account_stats
 from bridge.models import Account
 from bridge.quotas import release_account, reserve_next_account
+
+_DEFAULT_BRIDGE = dict(dj_settings.BRIDGE)
 
 BRIDGE = {
     "TOKEN": "test-token",
@@ -194,3 +197,27 @@ def test_temporary_model_block_expires():
     account.save(update_fields=["model_block_until"])
     names = {a.name for a in available_accounts(model="gpt-6.1-sol")}
     assert "relay" in names
+
+
+@override_settings(BRIDGE={**_DEFAULT_BRIDGE, "EXPLORE_RATE": "0", "ROTATION_MARGIN": "0"})
+@pytest.mark.django_db
+def test_default_weights_trade_price_for_latency():
+    """A cheap-but-slow channel must lose to a pricier low-TTFT one."""
+    fast = relay(
+        "fast",
+        ewma_ttft_ms=1000,
+        ewma_tps=80,
+        ewma_cost_per_1k=Decimal("0.050"),
+        ewma_success=1.0,
+        stats_samples=5,
+    )
+    cheap = relay(
+        "cheap",
+        ewma_ttft_ms=30000,
+        ewma_tps=20,
+        ewma_cost_per_1k=Decimal("0.001"),
+        ewma_success=1.0,
+        stats_samples=5,
+    )
+    ranked = rank_accounts([cheap, fast], "gpt-6.1-sol")
+    assert [a.name for a in ranked] == ["fast", "cheap"]

@@ -106,6 +106,8 @@ limit = 1 - reserve_ratio - safety_margin
 - 未取得额度数据前默认**不可用**（fail-closed），避免误耗官方额度
 - token 直接从 `~/.codex/auth.json` 读取，不复制进桥数据库；登录刷新后自动生效
 - 建议把官方账号设为 `tier=official, priority=1`，第三方设为 `tier=third_party`
+- 官方流不再整段缓冲：首字到达（或 `BRIDGE_OFFICIAL_PEEK_SECONDS` 校验窗口结束）即开始转发，Codex 可以边生成边渲染；窗口内出现的容量错误/立即截断仍会在转发前降级
+- 官方明确返回过载（`server_is_overloaded` 等）时，该模型会短暂跳过 `BRIDGE_OFFICIAL_OVERLOAD_COOLDOWN_SECONDS`，避免每条请求都先白等一次降级
 
 > 该策略按上游响应头/官方用量接口判定并预留 0.5% 安全余量；极端并发下仍可能因响应滞后出现轻微越线。
 
@@ -270,11 +272,13 @@ docker compose logs -f
 | `BRIDGE_OFFICIAL_QUOTA_URL` | `https://chatgpt.com/backend-api/wham/usage` | 官方额度接口 |
 | `BRIDGE_OFFICIAL_QUOTA_TTL_SECONDS` | `60` | 官方额度缓存时间 |
 | `BRIDGE_ROUTING_MODE` | `dynamic` | `dynamic` 动态评分 / `priority` 固定优先级 |
-| `BRIDGE_WEIGHT_COST` / `WEIGHT_TTFT` / `WEIGHT_SPEED` / `WEIGHT_ERROR` | `0.40/0.30/0.20/0.10` | 动态评分权重 |
+| `BRIDGE_WEIGHT_COST` / `WEIGHT_TTFT` / `WEIGHT_SPEED` / `WEIGHT_ERROR` | `0.20/0.50/0.25/0.05` | 动态评分权重（默认速度优先、价格为次） |
 | `BRIDGE_WEIGHT_PRIORITY` | `0.05` | 优先级在评分中的权重 |
 | `BRIDGE_STATS_MIN_SAMPLES` | `3` | 低于该样本数时给予探索加成 |
 | `BRIDGE_SLOW_TTFT_MS` / `BRIDGE_SLOW_MIN_TPS` | `10000` / `15` | 慢请求判定阈值 |
 | `BRIDGE_SLOW_PENALTY_SECONDS` | `600` | 慢请求后跳过该渠道的秒数 |
+| `BRIDGE_OFFICIAL_PEEK_SECONDS` | `5` | 官方流转发前的校验窗口（秒） |
+| `BRIDGE_OFFICIAL_OVERLOAD_COOLDOWN_SECONDS` | `30` | 官方明确过载后短暂跳过该模型的秒数（0 关闭） |
 | `BRIDGE_ROTATION_MARGIN` | `0.5` | 相近候选的轮换范围 |
 | `BRIDGE_EXPLORE_RATE` | `0.1` | 随机探索概率 |
 | `BRIDGE_ROUTING_ALPHA` | `0.6` | 指标 EWMA 响应速度 |

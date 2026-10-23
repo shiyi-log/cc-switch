@@ -211,12 +211,20 @@ BRIDGE = {
     ),
     # Dynamic routing: score = cost + TTFT + speed + error rate.
     'ROUTING_MODE': os.environ.get('BRIDGE_ROUTING_MODE', 'dynamic'),
-    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.90')),
-    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.04')),
-    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.03')),
-    'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.03')),
+    'WEIGHT_COST': float(os.environ.get('BRIDGE_WEIGHT_COST', '0.20')),
+    'WEIGHT_TTFT': float(os.environ.get('BRIDGE_WEIGHT_TTFT', '0.50')),
+    'WEIGHT_SPEED': float(os.environ.get('BRIDGE_WEIGHT_SPEED', '0.25')),
+    'WEIGHT_ERROR': float(os.environ.get('BRIDGE_WEIGHT_ERROR', '0.05')),
     'WEIGHT_PRIORITY': float(os.environ.get('BRIDGE_WEIGHT_PRIORITY', '0.0')),
     'STATS_MIN_SAMPLES': int(os.environ.get('BRIDGE_STATS_MIN_SAMPLES', '3')),
+    # Official Codex streams: validate this many seconds before forwarding, so
+    # capacity errors still fail over while the client starts seeing tokens ASAP.
+    'OFFICIAL_PEEK_SECONDS': float(os.environ.get('BRIDGE_OFFICIAL_PEEK_SECONDS', '5')),
+    # Skip the official account briefly after an explicit overload, instead of
+    # paying the failed peek on every request. 0 disables the backoff.
+    'OFFICIAL_OVERLOAD_COOLDOWN_SECONDS': int(
+        os.environ.get('BRIDGE_OFFICIAL_OVERLOAD_COOLDOWN_SECONDS', '30')
+    ),
     # Fast adaptation: a single slow request should move traffic away.
     'ROUTING_ALPHA': float(os.environ.get('BRIDGE_ROUTING_ALPHA', '0.6')),
     'SLOW_TTFT_MS': float(os.environ.get('BRIDGE_SLOW_TTFT_MS', '10000')),

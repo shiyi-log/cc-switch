@@ -129,6 +129,14 @@ def _temp_block_model(account_id, model: str, seconds: int = 60) -> None:
     account.save(update_fields=["model_block_until"])
 
 
+def _looks_overloaded(message: str) -> bool:
+    lowered = (message or "").lower()
+    return any(
+        marker in lowered
+        for marker in ("overload", "at capacity", "server_is_overloaded", "try again later")
+    )
+
+
 def _block_model(account_id, model: str) -> None:
     account = Account.objects.filter(pk=account_id).first()
     if account is None or not model:
@@ -404,7 +412,19 @@ async def proxy(request, path: str):
                 except StreamRejected as exc:
                     last_error_message = str(exc)
                     last_error_status = 502
-                    if account.protocol != Account.PROTOCOL_CODEX:
+                    if account.protocol == Account.PROTOCOL_CODEX:
+                        # Official overload: stop paying the failed peek on every
+                        # new request for a short while, then try it again.
+                        bench = int(
+                            settings.BRIDGE.get(
+                                "OFFICIAL_OVERLOAD_COOLDOWN_SECONDS", 30
+                            )
+                        )
+                        if bench > 0 and _looks_overloaded(last_error_message):
+                            await sync_to_async(_temp_block_model)(
+                                account.pk, model, bench
+                            )
+                    else:
                         await sync_to_async(mark_failure)(account.pk, str(exc), 502)
                     await sync_to_async(_log_request)(
                         account=account,
@@ -561,6 +581,9 @@ async def _buffer_stream(
         total += len(chunk)
         if total > max_bytes:
             raise StreamRejected("upstream stream too large to buffer")
+        if parser.error_message:
+            # Fail over now instead of waiting out the validation window.
+            return b"".join(chunks), iterator, False
         if stop_at_content and parser.first_content_at is not None:
             return b"".join(chunks), iterator, False
         if stop_after_events and parser.events >= stop_after_events:
@@ -623,23 +646,17 @@ async def _success(
     # Official Codex returns SSE with an application/json content-type.
     is_stream = wants_stream or "text/event-stream" in content_type
     if is_stream and account.protocol == Account.PROTOCOL_CODEX:
-        # Buffer official responses: capacity errors/truncated streams must be
-        # turned into a retry on another provider before anything reaches Codex.
+        # Official streams can be truncated mid-response when overloaded.
+        # Buffer until response.completed so a truncated stream can be retried
+        # on another provider before anything reaches Codex.
         content_type = "text/event-stream"
         parser = SSEUsageParser()
-        # Official streams can be truncated mid-response when overloaded.
-        # Buffer the whole stream so a truncated one can be retried on another
-        # provider before anything reaches Codex.
         body, iterator, ended = await _buffer_stream(parser, response)
-        if parser.error_message:
+        if parser.error_message or not parser.completed:
             await _close(client, response)
-            raise StreamRejected(parser.error_message)
-        if ended and not parser.completed:
-            await _close(client, response)
-            raise StreamRejected("official stream ended before completion")
-        if not parser.completed:
-            await _close(client, response)
-            raise StreamRejected("official stream ended before completion")
+            raise StreamRejected(
+                parser.error_message or "official stream ended before completion"
+            )
         await _record(
             account,
             request_id=request_id,

@@ -374,3 +374,77 @@ async def test_official_stream_without_completion_fails_over(official_settings):
     assert route.call_count == 1
     refreshed = await Account.objects.aget(pk=official.pk)
     assert refreshed.cooldown_until is None  # official is never benched
+
+
+class _SlowOfficialStream(httpx.AsyncByteStream):
+    """Official SSE that keeps generating after the first events."""
+
+    def __init__(self, content_delay=0.25, done_delay=1.5):
+        self.content_delay = content_delay
+        self.done_delay = done_delay
+
+    async def __aiter__(self):
+        import asyncio
+
+        yield (
+            b'event: response.created\ndata: {"type":"response.created",'
+            b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+        )
+        await asyncio.sleep(self.content_delay)
+        yield (
+            b'event: response.output_text.delta\ndata: '
+            b'{"type":"response.output_text.delta","delta":"ok"}\n\n'
+        )
+        await asyncio.sleep(self.done_delay)
+        yield (
+            b'event: response.completed\ndata: {"type":"response.completed",'
+            b'"response":{"model":"gpt-6.1-sol","usage":'
+            b'{"input_tokens":3,"output_tokens":2}}}\n\n'
+        )
+
+
+
+
+
+@pytest.mark.django_db(transaction=True)
+@respx.mock
+async def test_official_overload_benches_model_briefly(official_settings):
+    """An explicit overload should skip official on the next requests."""
+    import time
+
+    official = await make_official("0.10")
+    await make_relay()
+    respx.post("https://chatgpt.com/backend-api/codex/responses").mock(
+        return_value=httpx.Response(
+            200,
+            content=(
+                b'event: response.failed\ndata: {"type":"response.failed",'
+                b'"response":{"error":{"message":"Our servers are currently overloaded."}}}\n\n'
+            ),
+            headers={"content-type": "application/json"},
+        )
+    )
+    relay_sse = (
+        b'event: response.created\ndata: {"type":"response.created",'
+        b'"response":{"model":"gpt-6.1-sol"}}\n\n'
+        b'event: response.completed\ndata: {"type":"response.completed",'
+        b'"response":{"model":"gpt-6.1-sol","usage":{"input_tokens":3,"output_tokens":2}}}\n\n'
+    )
+    respx.post("https://relay.test/v1/responses").mock(
+        return_value=httpx.Response(
+            200, content=relay_sse, headers={"content-type": "text/event-stream"}
+        )
+    )
+
+    client = AsyncClient()
+    response = await client.post(
+        "/v1/responses",
+        data=json.dumps({"model": "gpt-6.1-sol", "input": "hi", "stream": True}),
+        content_type="application/json",
+        headers={"x-bridge-token": "test-token"},
+    )
+    assert response.status_code == 200
+    _ = [chunk async for chunk in response.streaming_content]
+
+    refreshed = await Account.objects.aget(pk=official.pk)
+    assert (refreshed.model_block_until or {}).get("gpt-6.1-sol", 0) > time.time()
